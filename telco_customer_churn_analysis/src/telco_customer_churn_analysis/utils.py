@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pingouin
 import warnings
+import numpy as np
+import random
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 
 ## Data Wrangling Functions
@@ -1056,3 +1058,134 @@ def chi_squared_test(df: pd.DataFrame, col1: str, col2: str, alpha: float = 0.05
         print(f'This means there is no statistically significance evidence of an association between {col1} and {col2}.')
 
     return expected, observed, stats
+
+
+## Data Generation Functions
+
+def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
+    """
+    Generates a synthetic dataset of customer telecommunications data suitable for
+    a churn prediction project. The data is structured with realistic dependencies
+    and simulated feature interactions to create a realistic classification task.
+
+    The generation process simulates:
+    1. Geographic and identifying information (CustomerID, City, Lat/Long).
+    2. Demographic and household features (Gender, Senior Citizen, Partner, Dependents).
+    3. Contract and Billing terms.
+    4. Service dependencies (e.g., Multiple Lines requires Phone Service; Add-ons require Internet Service).
+    5. Tenure and financial charges, where Total Charges are dependent on Monthly Charges and Tenure.
+    6. The target variable ('Churn Value') is simulated with higher probability
+       for 'Month-to-month' contracts and low tenure, mimicking real-world leakage.
+
+    Parameters
+    ----------
+    n_records (int, optional): The number of customer records to generate. Defaults to 10000.
+    seed (int, optional): The random seed used to ensure reproducibility across
+                          numpy and the standard random library. Defaults to 123.
+
+    Returns
+    -------
+    pandas.DataFrame: A DataFrame containing the synthetic customer data with
+                      33 columns in a predefined order, suitable for immediate
+                      preprocessing and model training.
+    """
+
+    np.random.seed(seed)
+    random.seed(seed)
+    N_RECORDS = n_records
+
+    data: Dict[str, Union[np.ndarray, List[str]]] = {}
+
+    data['CustomerID'] = [f'CUST-{i:05d}' for i in range(1, N_RECORDS + 1)]
+    data['Count'] = 1
+    data['Country'] = 'United States'
+    data['State'] = 'California'
+
+    cities = [f'City_{i}' for i in range(1, 51)]
+    data['City'] = np.random.choice(cities, N_RECORDS)
+    data['Zip Code'] = np.random.randint(90001, 96163, N_RECORDS).astype(str)
+    data['Latitude'] = np.random.uniform(32.5, 42.0, N_RECORDS)
+    data['Longitude'] = np.random.uniform(-124.5, -114.0, N_RECORDS)
+    data['Lat Long'] = [f"{lat:.4f}, {lon:.4f}" for lat, lon in zip(data['Latitude'], data['Longitude'])]
+
+
+    data['Gender'] = np.random.choice(['Male', 'Female'], N_RECORDS)
+    data['Senior Citizen'] = np.random.choice(['Yes', 'No'], N_RECORDS, p=[0.16, 0.84])
+    data['Partner'] = np.random.choice(['Yes', 'No'], N_RECORDS)
+    data['Dependents'] = np.random.choice(['Yes', 'No'], N_RECORDS, p=[0.3, 0.7])
+
+
+    data['Contract'] = np.random.choice(['Month-to-month', 'One year', 'Two year'], N_RECORDS, p=[0.55, 0.22, 0.23])
+    data['Paperless Billing'] = np.random.choice(['Yes', 'No'], N_RECORDS)
+    data['Payment Method'] = np.random.choice(['Electronic check', 'Mailed check', 'Bank transfer (automatic)', 'Credit card (automatic)'], N_RECORDS)
+
+    data['Phone Service'] = np.random.choice(['Yes', 'No'], N_RECORDS, p=[0.90, 0.10])
+    data['Internet Service'] = np.random.choice(['DSL', 'Fiber optic', 'No'], N_RECORDS, p=[0.35, 0.45, 0.20])
+
+    data['Multiple Lines'] = np.where(
+        data['Phone Service'] == 'No',
+        'No phone service',
+        np.random.choice(['Yes', 'No'], N_RECORDS, p=[0.45, 0.55])
+    )
+
+    internet_dependent_cols = ['Online Security', 'Online Backup', 'Device Protection',
+                               'Tech Support', 'Streaming TV', 'Streaming Movies']
+
+    for col in internet_dependent_cols:
+        data[col] = np.where(
+            data['Internet Service'] == 'No',
+            'No internet service',
+            np.random.choice(['Yes', 'No'], N_RECORDS, p=[0.4, 0.6])
+        )
+
+    data['Tenure Months'] = np.random.randint(1, 73, N_RECORDS)
+
+    monthly_charges = np.where(
+        data['Internet Service'] == 'Fiber optic',
+        np.random.normal(loc=95, scale=18, size=N_RECORDS).clip(min=50),
+        np.random.normal(loc=50, scale=12, size=N_RECORDS).clip(min=18)
+    )
+    data['Monthly Charges'] = np.round(monthly_charges, 2)
+
+    total_charges = data['Monthly Charges'] * data['Tenure Months'] * np.random.uniform(0.9, 1.1, N_RECORDS)
+    data['Total Charges'] = np.round(total_charges, 2)
+    data['Total Charges'] = np.where(data['Tenure Months'] <= 1, data['Monthly Charges'], data['Total Charges'])
+
+    churn_prob_base = np.where(data['Contract'] == 'Month-to-month', 0.45, 0.10)
+    churn_prob_adjusted = np.where(data['Tenure Months'] <= 5, churn_prob_base * 1.5, churn_prob_base)
+    data['Churn Value'] = (np.random.rand(N_RECORDS) < churn_prob_adjusted.clip(max=1.0)).astype(int)
+
+    data['Churn Score'] = np.where(
+        data['Churn Value'] == 1,
+        np.random.randint(75, 100, N_RECORDS),
+        np.random.randint(10, 65, N_RECORDS)
+    )
+
+    data['CLTV'] = np.where(
+        (data['Churn Value'] == 0) & (data['Contract'] == 'Two year'),
+        np.random.randint(4500, 7500, N_RECORDS),
+        np.random.randint(1500, 4500, N_RECORDS)
+    )
+
+    churn_reasons = ['Competitor', 'Service Quality', 'Pricing', 'Moved', 'Other']
+    data['Churn Reason'] = np.where(
+        data['Churn Value'] == 1,
+        np.random.choice(churn_reasons, N_RECORDS),
+        ''
+    )
+
+    data = pd.DataFrame(data)
+
+    final_order = [
+        'CustomerID', 'Count', 'Country', 'State', 'City', 'Zip Code', 'Lat Long',
+        'Latitude', 'Longitude', 'Gender', 'Senior Citizen', 'Partner',
+        'Dependents', 'Tenure Months', 'Phone Service', 'Multiple Lines',
+        'Internet Service', 'Online Security', 'Online Backup', 'Device Protection',
+        'Tech Support', 'Streaming TV', 'Streaming Movies', 'Contract',
+        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges',
+        'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason'
+    ]
+
+    data = data[final_order]
+
+    return data
