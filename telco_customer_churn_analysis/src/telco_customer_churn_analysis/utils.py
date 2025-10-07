@@ -1,6 +1,12 @@
 import pandas as pd
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 from IPython import display
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
+
+## Data Wrangling Functions
 
 def safe_display(data: Any) -> Any:
     """
@@ -521,4 +527,410 @@ def drop_labels(df: pd.DataFrame, labels: Union[str, List[str]] = None, axis: Un
     except Exception as e:
         raise RuntimeError(f"RuntimeError: An unexpected error occurred during the drop operation. Details: {e}.")
     
+
+
+## EDA Functions
+
+def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal['x', 'y'] = 'x',
+               hue: Optional[str] = None, order: Optional[List[Union[str, float, int]]] = None,
+               palette: Optional[Union[str, List[str], Dict[str, str]]] = None,
+               tick_rotation: Union[int, float] = 0) -> None:
+    """
+    Creates, labels, and displays a seaborn count plot with bar labels.
+
+    This function is a wrapper around seaborn.countplot, customizing the plot
+    with a title, axis labels, value labels (counts) centered in the bars,
+    and handling tick rotation. It relies on matplotlib (plt) and seaborn (sns).
+
+    Parameters
+    ----------
+    title : str
+        The title of the plot.
+    label : str
+        The label for the data axis (x-axis if axis='x', y-axis if axis='y').
+    df : pandas.DataFrame
+        The DataFrame containing the data.
+    col : str
+        The name of the column to count (plotted on the data axis).
+    axis : {'x', 'y'}, optional
+        The orientation of the plot ('x' for vertical bars, 'y' for horizontal bars).
+        Defaults to 'x'.
+    hue : str, optional
+        The name of the column for color encoding (grouping). Must be present in `df`.
+    order : list of (str, float, or int), optional
+        The desired order of the categories on the count axis.
+    palette : str, list, or dict, optional
+        The color palette to use. Can be a name, list of colors, or a dict mapping hue levels to colors.
+    tick_rotation : int or float, optional
+        The rotation angle (in degrees) for the tick labels on the data axis. Defaults to 0.
+
+    Returns
+    -------
+    None
+        The function displays the plot using plt.show().
+
+    Raises
+    ------
+    TypeError
+        If `df` is not a DataFrame, or if `title`, `label`, `col`, or `hue` (if provided) are not strings.
+    KeyError
+        If `col` or `hue` (if provided) is not found in the DataFrame columns.
+    ValueError
+        If `axis` is not 'x' or 'y', or if `tick_rotation` is not a number.
+    RuntimeError
+        For unexpected issues during plot generation.
+    """
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"TypeError: Input 'df' must be a pandas DataFrame, but received {type(df).__name__}.")
+
+    if not all(isinstance(arg, str) for arg in [title, label, col]):
+        raise TypeError(f"TypeError: 'title', 'label', and 'col' must all be strings.")
+
+    if col not in df.columns:
+        raise KeyError(f"KeyError: Column '{col}' not found in DataFrame. Available columns {list(df.columns)}.")
+
+    if hue is not None:
+        if not isinstance(hue, str):
+            raise TypeError(f"TypeError: 'hue' must be a string column name.")
+
+        if hue not in df.columns:
+            raise KeyError(f"KeyError: Hue column '{hue}' not found in DataFrame. Available columns {list(df.columns)}.")
+
+    if axis not in ('x', 'y'):
+        raise ValueError(f"ValueError: 'axis' must be 'x' or 'y', but received '{axis}'.")
+
+    if not isinstance(tick_rotation, (int, float)):
+        raise ValueError(f"ValueError: 'tick_rotation' must be a number (int or float), but received {type(tick_rotation).__name__}.")
+
+    try:
+        fig, ax = plt.subplots(figsize=(10,6))
+
+        plot_kwargs = {'data': df, 'hue': hue, 'order': order, 'palette': palette, axis: col}
+
+        sns.countplot(ax=ax, **plot_kwargs)
+
+        if axis == 'x':
+            ax.set_xlabel(label)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=tick_rotation)
+            ax.set_ylabel('Count')
+
+        else:
+            ax.set_ylabel(label)
+            ax.set_yticklabels(ax.get_yticklabels(), rotation=tick_rotation)
+            ax.set_xlabel('Count')
+
+        for container in ax.containers:
+          ax.bar_label(container, fmt='%.0f', label_type='center', color='white', fontsize=10)
+
+        ax.set_title(title)
+
+        plt.tight_layout()
+        plt.show()
+
+    except Exception as e:
+        raise RuntimeError(f"RuntimeError: An unexpected error occurred during plot generation. Details: {e}.")
+    
+
+def histogram(title: str, label: str, df: pd.DataFrame, col: str,
+              bins: Union[int, List[Union[int, float]]], axis: Literal['x', 'y'] = 'x',
+              hue: Optional[str] = None, kde: bool = False) -> None:
+    """
+    Generates and displays a histogram using seaborn.
+
+    This function is a wrapper around seaborn.histplot to visualize the
+    distribution of a numerical variable. It provides options for setting the
+    number of bins, adding a hue variable for stratification, and overlaying a
+    Kernel Density Estimate (KDE) line. The plot is configured with a title
+    and a custom label for the data axis. It relies on matplotlib (plt) and seaborn (sns).
+
+    Parameters
+    ----------
+    title : str
+        The title of the histogram.
+    label : str
+        The label for the **data axis** (x-axis if axis='x', y-axis if axis='y').
+    df : pandas.DataFrame
+        The DataFrame containing the data.
+    col : str
+        The name of the numerical column to plot.
+    bins : int or list of (int or float)
+        The number of bins for the histogram (int) or a sequence of bin edges (list).
+    axis : {'x', 'y'}, optional
+        The orientation of the plot ('x' for vertical bars, 'y' for horizontal bars).
+        Defaults to 'x'.
+    hue : str, optional
+        The name of a categorical column to use for color encoding (grouping).
+        Defaults to None.
+    kde : bool, optional
+        If True, a Kernel Density Estimate line is overlaid on the plot. Defaults to False.
+
+    Returns
+    -------
+    None
+        The function displays the plot using plt.show().
+
+    Raises
+    ------
+    TypeError
+        If `df` is not a DataFrame, or if `title`, `label`, `col`, or `hue` (if provided) are not strings.
+    KeyError
+        If `col` or `hue` (if provided) is not found in the DataFrame columns.
+    ValueError
+        If `axis` is not 'x' or 'y'.
+    RuntimeError
+        For unexpected issues during plot generation (e.g., non-numerical data).
+    """
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"TypeError: Input 'df' must be a pandas DataFrame, but received {type(df).__name__}.")
+
+    if not all(isinstance(arg, str) for arg in [title, label, col]):
+        raise TypeError(f"TypeError: 'title', 'label', and 'col' must all be strings.")
+
+    if col not in df.columns:
+        raise KeyError(f"KeyError: Column '{col}' not found in DataFrame. Available columns: {list(df.columns)}.")
+
+    if hue is not None:
+        if not isinstance(hue, str):
+            raise TypeError(f"TypeError: 'hue'must be a string column name.")
+
+        if hue not in df.columns:
+            raise KeyError(f"KeyError: Hue column '{hue}' not found in DataFrame. Available columns: {list(df.columns)}.")
+
+    if axis not in ('x', 'y'):
+        raise ValueError(f"ValueError: 'axis' must be 'x' or 'y', but received '{axis}'.")
+
+    try:
+        fig, ax = plt.subplots(figsize=(10,6))
+
+        plot_kwargs = {'data': df, 'bins': bins, 'hue': hue, 'kde': kde, axis: col}
+
+        sns.histplot(ax=ax, **plot_kwargs)
+
+        if axis == 'x':
+            plt.xlabel(label)
+        else:
+            plt.ylabel(label)
+
+        ax.set_title(title)
+
+        plt.tight_layout()
+        plt.show()
+
+    except Exception as e:
+        raise RuntimeError(f"RuntimeError: An unexpected error occurred during plot generation. Check if column 'col' is numerical. Details: {e}.")
+    
+
+def heatmap(title: str, df: pd.DataFrame, annot: bool = True, cmap: str = 'coolwarm',
+            fontsize: Union[int, float] = 7, num_decimals: int = 2) -> None:
+    """
+    Generates and displays a correlation heatmap of a DataFrame.
+
+    This function calculates the correlation matrix of all numeric columns in the
+    input DataFrame and visualizes it as a heatmap using seaborn. It provides
+    options to show the correlation values on the map, customize the color
+    scheme, annotation font size, and decimal precision.
+
+    Parameters
+    ----------
+    title : str
+        The title of the heatmap.
+    df : pandas.DataFrame
+        The DataFrame for which to create the correlation heatmap.
+    annot : bool, optional
+        If True, the correlation values are displayed on the heatmap. Defaults to True.
+    cmap : str, optional
+        The colormap to use for the heatmap. Defaults to 'coolwarm'.
+    fontsize : int or float, optional
+        The font size of the annotation text (correlation values) on the heatmap.
+        Defaults to 7.
+    num_decimals : int, optional
+        The number of decimal places to display for the correlation values.
+        Defaults to 2.
+
+    Returns
+    -------
+    None
+        The function displays the plot using plt.show().
+
+    Raises
+    ------
+    TypeError
+        If `df` is not a DataFrame, or if primary arguments are of the wrong type.
+    ValueError
+        If `num_decimals` or `fontsize` is negative, or if the DataFrame has no numeric columns.
+    RuntimeError
+        For unexpected issues during plot generation.
+    """
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"TypeError: Input 'df' must be a pandas DataFrame, but received {type(df).__name__}.")
+
+    if not isinstance(title, str):
+        raise TypeError(f"TypeError: 'title' must be a string, but received {type(title).__name__}.")
+
+    if not isinstance(annot, bool):
+        raise TypeError(f"TypeError: 'annot' must be a boolean, but received {type(annot).__name__}.")
+
+    if not isinstance(cmap, str):
+        raise TypeError(f"TypeError: 'cmap' must be a string, but received {type(cmap).__name__}.")
+
+    if not isinstance(fontsize, (int, float)) or fontsize <= 0:
+        raise ValueError(f"ValueError: 'fontsize' must be a positive number, but received {type(fontsize).__name__}.")
+
+    if not isinstance(num_decimals, int) or num_decimals < 0:
+        raise ValueError(f"ValueError: 'num_decimals' must be a non-negative integer, but received {type(num_decimals).__name__}.")
+
+    try:
+        corr_matrix = df.corr(numeric_only=True)
+
+        if corr_matrix.empty:
+            raise ValueError(f"ValueError: DataFrame contains no numeric columns to calculate a correlation matrix.")
+
+        n_cols = corr_matrix.shape[0]
+        fig_size = max(6, n_cols / 2)
+        plt.figure(figsize=(fig_size, fig_size))
+
+        fmt_str = f'.{num_decimals}f'
+
+        sns.heatmap(corr_matrix, annot=annot, cmap=cmap, fmt=fmt_str,
+                    annot_kws={'fontsize': fontsize}, cbar=True, linewidth=0.5, linecolor='black')
+
+        plt.title(title)
+        plt.yticks(rotation=0)
+        plt.xticks(rotation=90)
+
+        plt.tight_layout()
+        plt.show()
+
+    except ValueError as e:
+        raise e
+
+    except Exception as e:
+        raise RuntimeError(f"RuntimeError: An unexpected error occurred during plot generation. Details {e}.")
+    
+
+def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: str,
+                 bins: Union[int, List[Union[int, float]], pd.IntervalIndex],
+                 labels: Optional[List[str]] = None, right: bool = True, include_lowest: bool = True,
+                 axis: Literal['x', 'y'] = 'x', hue: Optional[str] = None,
+                 order: Optional[List[Union[str, float, int]]] = None,
+                 palette: Optional[Union[str, List[str], Dict[str, str]]] = None,
+                 tick_rotation: Union[int, float] = 0, show_plot: bool = True) -> pd.DataFrame:
+    """
+    Bins a numerical column and optionally generates a count plot of the binned data.
+
+    This function first uses pandas.cut to discretize a numerical column into
+    specified bins and returns a new DataFrame with the binned column added.
+    It then optionally calls the `count_plot` function to visualize the distribution.
+
+    Parameters
+    ----------
+    title : str
+        The title of the count plot.
+    label : str
+        The label for the data axis (x-axis if axis='x', y-axis if axis='y').
+    df : pandas.DataFrame
+        The DataFrame containing the data.
+    col : str
+        The name of the numerical column to be binned.
+    new_col : str
+        The name for the new binned column.
+    bins : int, list of (int/float), or pandas.IntervalIndex
+        The criteria for binning.
+    labels : list of str, optional
+        The labels for the returned bins. If provided, they will also be used
+        as the order for the count plot, overriding `order`.
+    right : bool, optional
+        Indicates whether the bins include the rightmost edge. Defaults to True.
+    include_lowest : bool, optional
+        Indicates whether the first bin should include the lower bound. Defaults to True.
+    axis : {'x', 'y'}, optional
+        The orientation of the plot ('x' for vertical bars, 'y' for horizontal bars).
+        Defaults to 'x'.
+    hue : str, optional
+        The name of the column for color encoding (grouping). Defaults to None.
+    order : list of (str, float, or int), optional
+        **Deprecated/Overridden.** The desired order of the categories (binned labels)
+        on the count axis. Note: If `labels` is provided, it will be used as the order.
+    palette : str, list, or dict, optional
+        The color palette to use for the count plot. Defaults to None.
+    tick_rotation : int or float, optional
+        The rotation angle for axis ticks. Defaults to 0.
+    show_plot : bool, optional
+        If True, the count plot is generated and displayed. Defaults to True.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of the original DataFrame with the new binned column (`new_col`) added.
+
+    Raises
+    ------
+    TypeError
+        If input arguments (like `df`, `title`, `col`, `new_col`, `hue`, `bins`, `labels`)
+        are not of the correct type.
+    KeyError
+        If `col` or `hue` (if provided) is not found in the DataFrame columns.
+    ValueError
+        If binning configuration is invalid (e.g., non-numeric column, mismatched bins/labels).
+    RuntimeError
+        For unexpected issues during binning or plotting.
+    """
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"TypeError: Input 'df' must be a pandas DataFrame, but received {type(df).__name__}.")
+
+    if not all(isinstance(arg, str) for arg in [title, label, col, new_col]):
+        raise TypeError(f"TypeError: 'title', 'label', 'col', and 'new_col' must be strings.")
+
+    if col not in df.columns:
+        raise KeyError(f"KeyError: Column '{col}' not found in DataFrame. Available columns {list(df.columns)}.")
+
+    if hue is not None and hue not in df.columns:
+        raise KeyError(f"KeyError: Hue column '{hue}' not found in DataFrame. Available columns {list(df.columns)}.")
+
+    if axis not in ('x', 'y'):
+        raise ValueError(f"ValueError: 'axis' must be 'x' or 'y', but received {axis}.")
+
+    if not isinstance(show_plot, bool):
+        raise TypeError(f"TypeError: 'show_plot' must be boolean.")
+
+    df_new = df.copy()
+
+    try:
+        df_new.loc[:, new_col] = pd.cut(df_new[col], bins=bins, labels=labels, right=right,
+                                        include_lowest=include_lowest)
+
+        if labels is not None:
+          plot_order = labels
+
+        elif pd.api.types.is_categorical_dtype(df_new[new_col]):
+          plot_order = df_new[new_col].cat.categories.tolist()
+
+        else:
+          plot_order = df_new[new_col].unique().tolist()
+
+    except KeyError as e:
+        raise KeyError(f"KeyError: An internal column reference failed during binning. Details: {e}.")
+
+    except ValueError as e:
+        raise ValueError(f"ValueError: Invalid binning configuration. Check if column '{col}' is numeric, or if bins/labels are correctly formatted. Details: {e}.")
+
+    except Exception as e:
+        raise RuntimeError(f"RuntimeError: An unexpected error occurred during binning of column {col}. Details: {e}.")
+
+    if show_plot:
+      try:
+        count_plot(title=title, label=label, df=df_new, col=new_col, axis=axis, hue=hue, order=plot_order, palette=palette, tick_rotation=tick_rotation)
+
+      except NameError:
+        warnings.warn("Warning: The 'count_plot' function is required but not defined in the current scope. Plotting skipped.")
+
+      except Exception as e:
+        raise RuntimeError(f"RuntimeError: Plotting failed for binned column '{new_col}'. Details: {e}.")
+
+    return df_new
+
 
