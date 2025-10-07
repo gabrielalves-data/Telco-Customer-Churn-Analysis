@@ -1,0 +1,57 @@
+[project]
+name = "telco_customer_churn_analysis"
+version = "0.1.0"
+description = "Developed a financially optimized churn prediction model using a Random Forest classifier and SHAP explainability to identify high-risk customers and maximize retention profit. The solution targets key churn drivers with data-driven interventions, improving customer lifetime value while enabling measurable, ROI-focused campaign deployment."
+readme = "README.md"
+authors = [
+  {name = "Gabriel Alves", email = "gabrielda2.work@gmail.com"}
+]
+maintainers = [
+  {name = "Gabriel Alves", email = "gabrielda2.work@gmail.com"}
+]
+classifiers = [
+    # TODO
+]
+license = {text = "MIT"}
+dependencies = [
+  "typer"
+]
+requires-python = ">= 3.10"
+
+[project.optional-dependencies]
+test = [
+    "coverage",  # testing
+    "pytest",  # testing
+    "ruff",  # linting
+    "ty", # checking types
+    "ipdb", # debugging
+]
+
+[project.urls]
+bugs = "https://github.com/gabrielalves-data/telco_customer_churn_analysis/issues"
+changelog = "https://github.com/gabrielalves-data/telco_customer_churn_analysis/blob/master/changelog.md"
+homepage = "https://github.com/gabrielalves-data/telco_customer_churn_analysis"
+
+[project.scripts]
+telco_customer_churn_analysis = "telco_customer_churn_analysis.cli:app"
+
+[tool.ty]
+# All rules are enabled as "error" by default; no need to specify unless overriding.
+# Example override: relax a rule for the entire project (uncomment if needed).
+# rules.TY015 = "warn"  # For invalid-argument-type, warn instead of error.
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+
+[tool.uv]
+package = true
