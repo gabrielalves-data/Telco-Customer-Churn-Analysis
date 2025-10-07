@@ -3,6 +3,7 @@ from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 from IPython import display
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pingouin
 import warnings
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 
@@ -934,3 +935,124 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
     return df_new
 
 
+## Statistical Tests Functions
+
+def chi_squared_test(df: pd.DataFrame, col1: str, col2: str, alpha: float = 0.05) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """
+    Performs a Chi-Squared Test of Independence on two categorical columns.
+
+    This function tests for a statistical association between two categorical
+    variables using the `pingouin` library. It first checks the assumption that
+    less than 20% of the cells have an expected frequency of less than 5. If the
+    assumption is met, it calculates and prints the observed and expected frequencies,
+    along with the test statistics. It then interprets the results,
+    providing a conclusion based on the p-value and the strength of the
+    association using Cramer's V.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        The DataFrame containing the data.
+    col1 : str
+        The name of the first categorical column.
+    col2 : str
+        The name of the second categorical column.
+    alpha : float, optional
+        The significance level for the test. Defaults to 0.05.
+
+    Returns
+    -------
+    tuple: A tuple containing:
+            - expected (pandas.DataFrame or None): The expected frequencies under the null hypothesis.
+            - observed (pandas.DataFrame or None): The observed frequencies (contingency table).
+            - stats (pandas.DataFrame or None): A table of test statistics, including
+              Chi-Square ($\chi^2$), p-value, Cramer's V, and statistical power.
+            Returns (None, None, None) if assumptions are not met.
+
+    Raises
+    ------
+    TypeError
+        If `df` is not a DataFrame, or if `col1`, `col2`, or `alpha` are of the wrong type.
+    KeyError
+        If `col1` or `col2` are not found in the DataFrame columns.
+    ValueError
+        If `alpha` is not between 0 and 1.
+    RuntimeError
+        For unexpected issues during test calculation.
+    """
+
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"TypeError: Input 'df'must be a pandas DataFrame, but received {type(df).__name__}.")
+
+    if not all(isinstance(arg, str) for arg in [col1, col2]):
+        raise TypeError(f"TypeError: 'col1' and 'col2' must be strings.")
+
+    if col1 not in df.columns:
+        raise KeyError(f"KeyError: Column '{col1}' not found in DataFrame. Available columns: {list(df.columns)}.")
+
+    if col2 not in df.columns:
+        raise KeyError(f"KeyError: Column '{col2}' not found in DataFrame. Available columns: {list(df.columns)}.")
+
+    if not isinstance(alpha, float) or not (0 < alpha < 1):
+        raise ValueError(f"ValueError: 'alpha' must be a float between 0 and 1.")
+
+    try:
+        expected, observed, stats = pingouin.chi2_independence(data=df, x=col1 , y=col2)
+
+    except Exception as e:
+        raise RuntimeError(f"RuntimeError: An unexpected error occurred during Chi-Squared test: {e}.")
+
+
+    total_cells = expected.size
+    cells_less_5 = (expected.values < 5).sum()
+    percent_cells_less_5 = (cells_less_5 / total_cells) * 100
+
+    if percent_cells_less_5 > 20:
+        print(f"Assumption Not Met: {percent_cells_less_5}% of cells have expected frequencies < 5 (required < 20%). Test aborted.")
+        return None, None, None
+
+    print('------Expected Frequencies------')
+    print(expected)
+
+    print('\n------Observed Frequencies------')
+    print(observed)
+
+    print('\n------Test Statistics Summary------')
+    print(stats)
+
+    try:
+        pearson_stats = stats[stats['test'] == 'pearson']
+        pearson_p_val = pearson_stats['pval'].item()
+        cramer = pearson_stats['cramer'].item()
+        statistical_power = pearson_stats['power'].item()
+
+    except IndexError:
+        print("Warning: Could not extract Pearson Chi-Squared statistics for interpretation.")
+        return expected, observed, stats
+
+    if pearson_p_val <= alpha:
+        result = 'Reject Null Hypothesis (H9)'
+        if cramer <= 0.10:
+            cramer_result = 'Weak Association'
+        elif cramer > 0.10 and cramer <= 0.30:
+            cramer_result = 'Moderate Association'
+        elif cramer > 0.30 and cramer <= 0.50:
+            cramer_result = 'Strong Association'
+        else:
+            cramer_result = 'Very Strong Association'
+
+        type_ii_error_chance = 1 - statistical_power
+
+        print(f'\n--- Conclusion ({col1} vs. {col2}) ---')
+        print(f'The p-val is {pearson_p_val:.4f}, which is less than or equal to the significance level (alpha = {alpha}), so we **{result}**.')
+        print(f'This means there is a statistically significant association between {col1} and {col2}.')
+        print(f'\nThe Cramer\'s V effect size is {cramer:.4f}, indicating a **{cramer_result}** between the two variables.')
+        print(f'\nStatistical Power is {statistical_power:.4f}. The chance of committing a Type II error (failing to detect a real effect) is {type_ii_error_chance * 100.0:.2f}%.')
+
+    else:
+        result = 'Fail to Reject the Null Hypothesis (H0)'
+        print(f'\n--- Conclusion ({col1} vs. {col2}) ---')
+        print(f'The p-value is {pearson_p_val:.4f}, which is higher than the significance level (alpha = {alpha}), so we **{result}**.')
+        print(f'This means there is no statistically significance evidence of an association between {col1} and {col2}.')
+
+    return expected, observed, stats
