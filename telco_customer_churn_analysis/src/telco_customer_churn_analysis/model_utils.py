@@ -10,10 +10,13 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from sklearn.naive_bayes import GaussianNB
 from sklearn.pipeline import Pipeline
 from itertools import product
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from typing import Union, Dict, List, Any, Optional, Tuple
+import joblib
 
 from utils import safe_display
+
+
 
 
 def preprocess_data(df: pd.DataFrame, target: str,
@@ -677,3 +680,312 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     except Exception as e:
         print(f"An unexpected error occurred during the workflow: {type(e).__name__} - {e}.")
         return {}, pd.DataFrame(), None, pd.DataFrame(), pd.DataFrame(), pd.Series(dtype='int')
+    
+
+## MLOPS, Optimization and Business Action Functions
+
+
+def profit_curve(median_value: float, cost: float, retention_rate: float,
+                 labels: Union[np.ndarray, pd.Series], predictions_proba: Union[np.ndarray, pd.Series]) -> Tuple[float, float, Dict[float, float]]:
+    """
+    Calculates the optimal prediction threshold and maximum expected profit
+    for a classification model based on a defined cost/benefit matrix.
+
+    This function simulates the financial outcome (profit or loss) of applying
+    an intervention (e.g., a retention offer) to customers identified as high-risk
+    across a fine-grained range of probability thresholds. It uses a cost-sensitive
+    evaluation defined by the business variables.
+
+    The financial matrix is calculated as follows:
+    - True Positive (TP): (Median Customer Value * Retention Rate) - Cost of Intervention
+    - False Positive (FP): Cost of Intervention (Intervention on non-churner)
+    - False Negative (FN): Median Customer Value (Lost value from missed churner)
+    - True Negative (TN): 0 (Correctly ignored)
+
+    Parameters
+    ----------
+    median_value (float): The median or average lifetime value (LTV) of a customer,
+                          used as the value lost for a False Negative.
+    cost (float): The cost of the intervention (e.g., the cost of the retention offer).
+    retention_rate (float): The expected success rate of the intervention (e.g.,
+                            if 40% of customers accept the offer and stay, use 0.40).
+    labels (numpy.ndarray or pandas.Series): The true binary target labels (Y_test).
+    predictions_proba (numpy.ndarray or pandas.Series): The predicted probabilities
+                                                        for the positive class (Churn=1).
+
+    Returns
+    -------
+    tuple
+        - best_threshold (float): The prediction probability threshold (e.g., 0.650)
+                                  that maximizes the total expected profit.
+        - best_profit (float): The maximum total profit achieved at the best_threshold.
+        - profit_values (dict): A dictionary mapping every threshold tested to its
+                                corresponding total profit, useful for plotting the curve.
+    """
+    TP_value = (median_value * retention_rate) - cost
+    FP_value = cost
+    FN_value = median_value
+    TN_value = 0
+
+    if isinstance(predictions_proba, pd.Series):
+        predictions_proba = predictions_proba.values
+
+    if isinstance(labels, pd.Series):
+        labels = labels.values
+
+    safe_display(predictions_proba)
+
+    thresholds = np.round(np.arange(0.050, 0.950 + 0.001, 0.001), 4)
+
+    profit_values: Dict[float, float] = {}
+
+    for t in thresholds:
+        predictions = (predictions_proba > t).astype(int)
+
+        matrix = confusion_matrix(labels, predictions)
+
+        if matrix.shape != (2, 2):
+            continue
+
+        TN = matrix[0, 0]
+        FP = matrix[0, 1]
+        FN = matrix[1, 0]
+        TP = matrix[1, 1]
+
+        profit = (TP * TP_value) - (FP * FP_value) - (FN * FN_value)
+
+        profit_values[t] = profit
+
+    if profit_values:
+        best_threshold, best_profit = max(profit_values.items(), key=lambda item: item[1])
+
+    else:
+        best_threshold = 0.500
+        best_profit = 0.0
+        print("Warning: Could not calculate profit curve. Check input data.")
+
+
+    profit_values = dict(sorted(profit_values.items(), key=lambda item: item[1], reverse=True))
+
+    return best_threshold, best_profit, profit_values
+
+
+def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
+                     cols_to_drop: Optional[Union[str, List[str]]]) -> Pipeline:
+    """
+    Retrains the final, best-performing model on the entire dataset (X + y) and saves
+    the complete, fitted scikit-learn Pipeline for deployment.
+
+    This function executes the final step of the MLOps process by maximizing the
+    information available to the model. It constructs a new Pipeline using the
+    unfitted preprocessor and the tuned classifier, then fits this entire
+    structure to all data (training and test combined). The final fitted Pipeline
+    is saved to a .pkl file for production use.
+
+    Parameters
+    ----------
+    df (pandas.DataFrame): The full, raw input DataFrame (contains X and y).
+    model (sklearn.pipeline.Pipeline): The best-performing, fitted Pipeline object
+                                       from the model comparison stage.
+    target (str): The name of the target variable column.
+    cols_to_drop (str or list, optional): Additional columns to drop from the
+                                          features before retraining.
+
+    Returns
+    -------
+    sklearn.pipeline.Pipeline: The final, fitted Pipeline object, ready for
+                               making predictions on new, raw data.
+
+    Side Effects
+    ------------
+    - Saves the fitted Pipeline object to a file named 'deployment_pipeline.pkl'
+      using joblib.
+    """
+
+    if cols_to_drop is None:
+        cols_to_drop_list: List[str] = []
+
+    elif isinstance(cols_to_drop, str):
+        cols_to_drop_list = [cols_to_drop]
+
+    else:
+        cols_to_drop_list = cols_to_drop
+
+    try:
+        X, y, _, _, _, _, preprocessor_unfitted, _ = preprocess_data(df, target=target,
+                                                            cols_to_drop=cols_to_drop_list)
+
+    except Exception as e:
+        if 'preprocessor' in model.named_steps:
+            preprocessor_unfitted = clone(model.named_steps['preprocessor'])
+            X = df.drop(columns=[target] + cols_to_drop_list, errors='ignore')
+            y = df[target]
+
+        else:
+            raise ValueError(f"Could not initialize data or extract preprocessor. Details {e}.")
+
+    if 'classifier' not in model.named_steps:
+        raise ValueError("Input model pipeline must contain a 'classifier' step.")
+
+
+    classifier_unfitted = clone(model.named_steps['classifier'])
+
+    deployment_pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor_unfitted),
+        ('classifier', classifier_unfitted)
+    ])
+
+    print('Retraining Final Model on The Entire Dataset...')
+    deployment_pipeline.fit(X, y)
+    print('Retraining Complete.')
+
+    try:
+        joblib.dump(deployment_pipeline, 'deployment_pipeline.pkl')
+        print("Deployment pipeline saved successfully to 'deployment_pipeline.pkl'.")
+
+    except Exception as e:
+        print("Error saving model with joblib: {e}.")
+
+    return deployment_pipeline
+
+
+def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = 'deployment_pipeline.pkl') -> pd.DataFrame:
+    """
+    Loads the fitted deployment pipeline, predicts the churn probability for a
+    dataset, flags customers for intervention, and filters the final target list.
+
+    This function is designed to be the production step, taking raw customer data
+    and returning a ranked list of high-risk customers who meet specific business
+    criteria (Contract type).
+
+    Parameters
+    ----------
+    df (pandas.DataFrame): The raw, unprocessed input customer data to score.
+    threshold (float): The optimal churn probability threshold (e.g., 0.650)
+                       determined by the Profit Curve analysis, above which
+                       customers are flagged for intervention.
+    model_path (str, optional): The file path to the saved, fitted deployment
+                                pipeline (a scikit-learn Pipeline object saved
+                                with joblib). Defaults to 'deployment_pipeline.pkl'.
+
+    Returns
+    -------
+    pandas.DataFrame: A DataFrame containing only the customers who meet both
+                      the model's high-risk criteria (Probability >= threshold)
+                      and the business segment criteria (Contract == 'Month-to-month').
+                      The DataFrame is sorted by 'Churn Probability' in descending
+                      order, prioritizing the highest-risk customers.
+
+    Side Effects
+    ------------
+    - Prints a message if the model file is not found.
+    - Prints the count of customers identified for intervention.
+    """
+
+    loaded_model: Optional[Pipeline] = None
+
+    try:
+        loaded_model = joblib.load(model_path)
+
+    except FileNotFoundError:
+        print("Error: Model Path Not Found")
+        return pd.DataFrame()
+
+    except Exception as e:
+        print(f"Error loading model: {e}.")
+        return pd.DataFrame()
+
+    try:
+        proba = loaded_model.predict_proba(df)[:,1]
+
+    except Exception as e:
+        print(f"Error during prediction: {e}.")
+        return pd.DataFrame()
+
+    df_scored = df.copy()
+    df_scored['Churn Probability'] = proba
+    df_scored['Intervention Flag'] = (proba >= threshold).astype(int)
+
+    test_target = df_scored[(df_scored['Intervention Flag'] == 1) & (df_scored['Contract'] == 'Month-to-month')].copy()
+
+    print(f'Identified {len(test_target)} customers for A/B/C intervention test.')
+
+    return test_target.sort_values(by='Churn Probability', ascending=False)
+
+
+def abc_test(high_risk_target: pd.DataFrame, random_seed: int = 123) -> pd.DataFrame:
+    """
+    Randomly assigns a pre-filtered population of high-risk customers into
+    three groups (A/Control, B/Price Offer, C/Service Offer) for an intervention test.
+
+    This function is typically run after a predictive model has identified and
+    filtered the final, actionable customer segment (e.g., customers with a
+    high probability of churn AND a 'Month-to-month' contract). The assignment
+    is balanced and randomized using the provided seed.
+
+    Parameters
+    ----------
+    high_risk_target : pandas.DataFrame
+        The DataFrame containing the final, pre-filtered set of customers to be
+        targeted for the A/B/C test. An empty DataFrame will result in an
+        early return with a message.
+
+    random_seed : int, default=123
+        Seed for the NumPy random number generator to ensure reproducible
+        assignment of customers to test groups.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The input DataFrame augmented with two new columns:
+        - **'Group'**: The randomized test group assignment, e.g., 'A (Control)'.
+        - **'Intervention Details'**: A specific description of the offer
+          associated with the group ('10% Off 1-Year Contract', '6 Months Free Tech Support',
+          or 'None (Control)').
+
+    Notes
+    -----
+    - The randomization uses ``numpy.random.choice`` with replacement, but since
+      the sample size is the total population size, this effectively performs a
+      simple random sample without replacement *if* all groups are present.
+      The sample is intended to be a simple random assignment into the three
+      categories (A, B, C).
+    - A summary table of the assignment count per group is printed to the console.
+    """
+
+    if high_risk_target.empty:
+        print('Dataframe empty. No customers assign to test groups.')
+        return pd.DataFrame()
+
+    target_population = high_risk_target.copy()
+    n = len(target_population)
+
+    if n == 0:
+        print('No high-risk customers found in the target segment for A/B/C testing.')
+        return pd.DataFrame()
+
+    groups = ['A (Control)', 'B (Price Offer)', 'C (Service Offer)']
+
+    np.random.seed(random_seed)
+    group_assignment = np.random.choice(groups, size=n, replace=True)
+
+    target_population['Group'] = group_assignment
+
+    def map_intervention(group):
+        if group == 'B (Price Offer)':
+            return '10% Off 1-Year Contract'
+
+        elif group == 'C (Service Offer)':
+            return '6 Months Free Tech Support'
+
+        else:
+            return 'None (Control)'
+
+    target_population['Intervention Details'] = target_population['Group'].apply(map_intervention)
+
+    summary = target_population['Group'].value_counts().reset_index()
+    summary.columns = ['Group', 'Customer Count']
+    print('---Test Group Assignment Summary')
+    print(summary.to_markdown(index=False))
+    return target_population
+
