@@ -1033,7 +1033,7 @@ def chi_squared_test(df: pd.DataFrame, col1: str, col2: str, alpha: float = 0.05
         return expected, observed, stats
 
     if pearson_p_val <= alpha:
-        result = 'Reject Null Hypothesis (H9)'
+        result = 'Reject Null Hypothesis (H0)'
         if cramer <= 0.10:
             cramer_result = 'Weak Association'
         elif cramer > 0.10 and cramer <= 0.30:
