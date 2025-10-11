@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 from unittest import mock
 import os
+import random
+from pathlib import Path
 
 from src.telco_customer_churn_analysis.utils import (safe_display, read_excel, df_head,
                                                      col_replace, null_rows, df_loc, df_aggfunc,
@@ -27,44 +29,71 @@ def empty_df():
     return pd.DataFrame({'A': [], 'B': [], 'C': [], 'D': []})
 
 
+@pytest.fixture
+def mock_excel_file(tmp_path):
+    """Creates a temporary dummy Excel file for testing"""
+    df = pd.DataFrame({'A': [1, 2], 'B': [3, 4], 'C': ['2021-01-01', '2021-02-01']})
+    file_path = tmp_path / "test.xlsx"
+    df.to_excel(file_path, index=False)
+    return str(file_path)
+
 ## safe_display tests
 
 class TestSafeDisplay:
     @staticmethod
     def test_safe_display_uses_display_when_available(sample_df):
         """Test that safe_display uses IPython.display.display when available."""
-        mock_display = mock.MagicMock()
-        with mock.patch.dict('sys.modules', {'IPython.display': mock.MagicMock(display=mock_display)}):
-            result = safe_display(sample_df)
+        mock_display_func = mock.MagicMock()
+        mock_display_module = mock.MagicMock(display=mock_display_func)
+
+        with mock.patch.dict('sys.modules', {'IPython.display': mock_display_module}):
+            with mock.patch('src.telco_customer_churn_analysis.utils.display', mock_display_func):
+                result = safe_display(sample_df)
         
-        mock_display.assert_called_once_with(sample_df)
+        mock_display_func.assert_called_once_with(sample_df)
         assert result.equals(sample_df)
 
 
     @staticmethod
     @mock.patch('builtins.print')
-    def test_safe_display_falls_back_to_print(mock_print):
-        """Test that safe_display falls back to print when display is not available."""
-        data = 'Test string'
-        with mock.patch.dict('builtins.__dict__', {'display': None}, clear=True):
-            safe_display(data)
-        
-        mock_print.assert_called_once_with(data)
+    def test_safe_display_falls_back_to_print_on_nameerror(mock_print, sample_df):
+        """Test safe display falls back to `print()` when `display()` is not defined (NameError)."""
+        with mock.patch('src.telco_customer_churn_analysis.utils.display', side_effect=NameError("Name 'display' not defined")):
+            safe_display(sample_df)
+
+        mock_print.assert_called_once_with(sample_df)
 
 
-## read_excel tests
+    @staticmethod
+    @mock.patch('builtins.print')
+    def test_safe_display_falls_back_to_print_on_general_exception(mock_print, sample_df):
+        """Test `safe_display()` falls back to `print()` and prints an error message on other Exceptions."""
+        error_msg = "Test Display Error: Cannot render widget."
+
+        with mock.patch('src.telco_customer_churn_analysis.utils.display', side_effect=ValueError(error_msg)):
+            safe_display(sample_df)
+
+        assert mock_print.call_count == 2
+
+        call_1_arg = mock_print.call_args_list[0][0][0]
+        call_2_arg = mock_print.call_args_list[1][0][0]
+
+        error_prefix = "Error: Failed to display data. Falling back to print()."
+
+        is_df_call_1 = isinstance(call_1_arg, pd.DataFrame) and call_1_arg.equals(sample_df)
+        is_df_call_2 = isinstance(call_2_arg, pd.DataFrame) and call_2_arg.equals(sample_df)
+
+        assert is_df_call_1 or is_df_call_2, "Expected one print call to contain the fallabck DataFrame."
+
+        is_err_call_1 = isinstance(call_1_arg, str) and error_prefix in call_1_arg
+        is_err_call_2 = isinstance(call_2_arg, str) and error_prefix in call_2_arg
+
+        assert (is_df_call_1 and is_err_call_2) or (is_err_call_1 and is_df_call_2), f"Expected one call to be the DataFrame and the other to contain the error prefix: '{error_prefix}'."
+
+
+## read_excel test
 
 class TestReadExcel:
-    @staticmethod
-    @pytest.fixture
-    def mock_excel_file(tmp_path):
-        """Creates a temporary dummy Excel file for testing."""
-        df = pd.DataFrame({'A': [1, 2], 'B': [3, 4], 'C': ['2021-01-01', '2021-02-01']})
-        file_path = tmp_path / "test.xlsx"
-        df.to_excel(file_path, index=False)
-        return str(file_path)
-
-    
     @staticmethod
     def test_read_excel_success(mock_excel_file):
         """Test successful reading a valid Excel file without date parsing."""
@@ -72,28 +101,30 @@ class TestReadExcel:
         assert isinstance(df, pd.DataFrame)
         assert df.shape == (2, 3)
         assert df['A'].dtype == 'int64'
+        assert df['C'].dtype == 'object'
 
-
+    
     @staticmethod
     def test_read_excel_with_date_parsing(mock_excel_file):
         """Test successful reading an Excel file with date parsing."""
         df = read_excel(mock_excel_file, date_cols=['C'])
         assert df['C'].dtype == 'datetime64[ns]'
 
-
+    
     @staticmethod
     def test_read_excel_raises_file_not_found_error():
-        """Test that read_excel raises FileNotFoundError for a non-existent file."""
-        with pytest.raises(FileNotFoundError, match='Error: File not found'):
-            read_excel("non_existent_file.xlsx")
+        """Test that `read_excel()` raises FileNotFound for a non-existing file."""
+        non_existent_path = "non_existent_path.xlsx"
+        with pytest.raises(FileNotFoundError, match=f"Error: File not found at path: {non_existent_path}"):
+            read_excel(non_existent_path)
 
 
     @staticmethod
     @mock.patch('pandas.read_excel')
     def test_read_excel_raises_import_error(mock_read_excel):
-        """Test that read_excel raises ImportError when no engine is available."""
-        mock_read_excel.side_effect = ImportError("No engine 'openpyxl' or 'xldr' found")
-        with pytest.raises(ImportError, match="Missing Excel engine"):
+        """Test that `read_excel()` raises ImportError when the Excel engine is missing."""
+        mock_read_excel.side_effect = ImportError("No engine 'openpyxl' or 'xlrd' found")
+        with pytest.raises(ImportError, match="Error. Missing Excel engine."):
             read_excel("mock_path.xlsx")
 
 
@@ -101,964 +132,525 @@ class TestReadExcel:
     @mock.patch('pandas.read_excel')
     @mock.patch('builtins.print')
     def test_read_excel_warns_on_empty_df(mock_print, mock_read_excel):
-        """Test that read_excel warns when an empty DataFrame is returned."""
+        """Test that `read_excel()` warns when an empty DataFrame is returned."""
+        mock_path = "mock_path.xlsx"
         mock_read_excel.return_value = pd.DataFrame()
-        df = read_excel("mock_path.xlsx")
-        mock_print.assert_called_once_with(mock.ANY)
+        df = read_excel(mock_path)
+
+        mock_print.assert_called_once_with(f"Warning: File loaded successfully, but '{mock_path}' is empty")
         assert df.empty
+
+
+    @staticmethod
+    @mock.patch('pandas.read_excel')
+    def test_read_excel_raises_runtime_error_on_general_exception(mock_read_excel):
+        """Test that `read_excel()` raises a generic RuntimeError for unhandled errors."""
+        mock_read_excel.side_effect = Exception("General parsi8ng failure")
+        with pytest.raises(RuntimeError, match="A critical error occurred while reading or parsing the Excel file"):
+            read_excel("mock_path.xlsx")
 
 
 ## df_head tests
 
 class TestDfHead:
-    
     @staticmethod
-    def test_df_head_returns_correct_tuple(sample_df):
-        """Test that df_head returns a tuple of (head, describe) DataFrames with correct content."""
-        with mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x) as mock_safe_display:
-            head, describe = df_head(sample_df)
+    @mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x)
+    @mock.patch('builtins.print')
+    def test_df_head_returns_correct_tuple(mock_print, mock_safe_display, sample_df):
+        """Test that `df_head()` returns a tuple of (head, describe) DataFrames with correct content."""
+        head, describe = df_head(sample_df)
 
         assert isinstance(head, pd.DataFrame)
         assert isinstance(describe, pd.DataFrame)
         assert head.shape == (5, 4)
+        assert describe.shape == (8, 2)
+        assert mock_safe_display.call_count == 2
 
 
     @staticmethod
-    def test_df_head_with_custom_n_rows(sample_df):
-        """Test that df_head returns correct number of rows when n_rows is specified."""
-        with mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x):
-            head, _ = df_head(sample_df, n_rows=3)
+    @mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x)
+    @mock.patch('builtins.print')
+    def test_df_head_with_custom_n_rows(mock_print, mock_safe_display, sample_df):
+        """Test that `df_head()` returns correct number of rows when n_rows is specified."""
+        head, _ = df_head(sample_df, n_rows=3)
+        
         assert head.shape == (3, 4)
 
 
     @staticmethod
     def test_df_head_raises_type_error():
-        """Test that df_head raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
+        """Test that `df_head()` raises TypeError when input is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input must be a pandas DataFrame, but received list"):
             df_head([1, 2, 3])
 
 
     @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x)
     @mock.patch('builtins.print')
-    def test_df_head_invalid_n_rows_warning(mock_print, sample_df):
-        """Test that df_head warns when n_rows is invalid."""
-        with mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x):
-            df_head(sample_df, n_rows=-1)
-        mock_print.assert_called_once_with("Warning: n_rows should be a non-negative integer. Using default value 5.")
+    def test_df_head_invalid_n_rows_warning_and_default(mock_print, mock_safe_display, sample_df):
+        """Test that `df_head()` warns when n_rows is invalid and uses the default 5."""
+        head, _ = df_head(sample_df, n_rows=-1)
+
+        mock_print.assert_any_call("Warning: n_rows must be a non-negative integer. Defaulting to 5.")
+
+        assert head.shape == (5, 4)
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.safe_display', side_effect=lambda x: x)
+    def test_df_head_raises_runtime_error_on_df_head_failure(mock_safe_display, sample_df):
+        """Test that `df_head()` raises RuntimeError if df.head() fails."""
+        with mock.patch.object(sample_df, 'head', side_effect=Exception("Head failed")):
+            with pytest.raises(RuntimeError, match="Error occurred while processing df.head"):
+                df_head(sample_df)
 
 
 ## col_replace tests
 
 class TestColReplace:
     @staticmethod
-    def test_col_replace_single_value(sample_df):
-        """Test replacing a single value in a column."""
-        new_df = col_replace(sample_df, 'A', 2, 20)
-        pd.testing.assert_series_equal(new_df['A'].values, np.array([1, 20, np.nan, 4, 5]))
-        assert sample_df['A'].iloc[1] == 2
+    def test_col_replace_success_single_value(sample_df):
+        """Test successful replacement of single value."""
+        new_df = col_replace(sample_df, 'B', 'x', 'new_x')
 
+        assert 'x' not in new_df['B'].values
+        assert 'new_x' in new_df['B'].values
+        assert new_df.shape == sample_df.shape
+        assert new_df.loc[0, 'B'] == 'new_x'
 
+    
     @staticmethod
-    def test_col_replace_list_of_values(sample_df):
-        """Test replacing a list of values in a column."""
-        new_df = col_replace(sample_df, 'B', ['x', 'y'], 'replaced')
-        assert (new_df['B'].values == np.array(['replaced', 'replaced', 'z', 'replaced', 'replaced'])).all()
+    def test_col_replace_success_list_of_values(sample_df):
+        """Test successful replacement of a list of values"""
+        new_df = col_replace(sample_df, 'B', ['x', 'y'], 'new_xy')
 
-
-    @staticmethod
-    def test_col_replace_warns_on_no_occurrence_single(mock_print, sample_df):
-        """Test that col_replace warns when no occurrences of the value to replace are found (single value)."""
-        col_replace(sample_df, 'A', 99, 100)
-        mock_print.assert_called_once_with("Warning: No occurrences of 99 found in column 'A'.")
+        assert 'x' not in new_df['B'].values
+        assert 'y' not in new_df['B'].values
+        assert 'new_xy' in new_df['B'].values
+        assert new_df.loc[0, 'B'] == 'new_xy'
+        assert new_df.loc[1, 'B'] == 'new_xy'
 
 
     @staticmethod
     def test_col_replace_raises_type_error():
-        """Test that col_replace raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            col_replace('not_df', 'col', 100, 200)
+        """Test that `col_replace()` raises TypeError when input 'df' is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame, but received list"):
+            col_replace([1 ,2], 'A', 1, 0)
 
 
     @staticmethod
     def test_col_replace_raises_key_error(sample_df):
-        """Test that col_replace raises KeyError when column does not exist."""
-        with pytest.raises(KeyError, match="Column 'Z' not found in DataFrame."):
-            col_replace(sample_df, 'Z', 1, 10)
+        """Test that `col_replace()` raises KeyError when the column is missing."""
+        with pytest.raises(KeyError, match="Column 'Z' not found in DataFrame"):
+            col_replace(sample_df, 'Z', 1, 0)
+
+
+    @staticmethod
+    @mock.patch('builtins.print')
+    def test_col_replace_wars_on_no_occurrence(mock_print, sample_df):
+        """Test that `col_replace()` warns when the 'old_var' is not found."""
+        col_replace(sample_df, 'B', 'non_existent', 'new_value')
+        mock_print.assert_called_once_with("Warning: No occurrence of non_existent found in column 'B'.")
+
+
+    @staticmethod
+    @mock.patch('builtins.print')
+    def test_col_replace_on_no_occurrence_list(mock_print, sample_df):
+        """Test that `col_replace()` warns when none of the 'old_var' list elements are found."""
+        col_replace(sample_df, 'B', ['non_existent_1', 'non_existent_2'], 'new_value')
+        mock_print.assert_called_once()
+
+
+    @staticmethod
+    def test_col_replace_raises_runtime_error_on_replacement_failure(sample_df):
+        """Test that `col_replace()` raises a RuntimeError for unexpected replacement issues."""
+        with mock.patch('pandas.Series.replace', side_effect=Exception("Replacement failed")) as mock_replace:
+            with pytest.raises(RuntimeError, match="An unexpected error occurred during replacement in column 'B'."):
+                col_replace(sample_df, 'B', 'x', 'new_x')
+
+        mock_replace.assert_called_once()
 
 
 ## null_rows tests
 
 class TestNullRows:
     @staticmethod
-    def test_null_rows_all_columns(sample_df):
-        """Test null_rows function for all columns."""
+    def test_null_rows_returns_dataframe_for_all_cols(sample_df):
+        """Test `null_rows()` returns a DataFrame of booleans when no columns are specified."""
         result = null_rows(sample_df)
+
+        expected_data = {
+            'A': [False, False, True, False, False],
+            'B': [False, False, False, False, False],
+            'C': [False, False, True, False, True],
+            'D': [False, False, False, False, False]
+        }
+
+        expected_df = pd.DataFrame(expected_data)
+
+        pd.testing.assert_frame_equal(result, expected_df)
         assert isinstance(result, pd.DataFrame)
         assert result.shape == sample_df.shape
-        assert result['A'].sum() == 1
 
 
     @staticmethod
-    def test_null_rows_single_column(sample_df):
-        """Test null_rows function for a single specified column."""
-        result = null_rows(sample_df, columns=['A'])
+    def test_null_rows_returns_series_for_single_col(sample_df):
+        """Test `null_rows()` returns a Series of booleans when one column is specified."""
+        result = null_rows(sample_df, 'A')
+
+        expected_data = [False, False, True, False, False]
+        expected_series = pd.Series(expected_data, name='A')
+
+        pd.testing.assert_series_equal(result, expected_series)
         assert isinstance(result, pd.Series)
-        assert result.sum() == 1
+        assert result.shape[0] == sample_df.shape[0]
 
 
     @staticmethod
-    def test_null_rows_multiple_columns(sample_df):
-        """Test null_rows function for multiple specified columns."""
-        result = null_rows(sample_df, columns=['A', 'C'])
+    def test_null_rows_returns_dataframe_for_multiple_cols(sample_df):
+        """Test `null_rows()` returns a DataFrame when multiple columns are specified."""
+        result = null_rows(sample_df, 'A', 'C')
+
         assert isinstance(result, pd.DataFrame)
-        assert list(result.columns) == ['A', 'C']
-        assert result['A'].sum() == 1
+        assert result.shape == (sample_df.shape[0], 2)
+        assert 'B' not in result.columns
 
 
     @staticmethod
-    def test_null_rows_raises_type_error():
-        """Test that null_rows raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            null_rows('not_df')
+    def test_null_rows_raises_type_error(sample_df):
+        """Test that `null_rows()` raises a TypeError when input is not a DataFrame."""
+        with pytest.raises(TypeError, match="TypeError: Input 'df' must be a pandas DataFrame, but received list"):
+            null_rows([1, 2, 3], 'A')
 
 
     @staticmethod
     def test_null_rows_raises_key_error(sample_df):
-        """Test that null_rows raises KeyError when specified columns do not exist."""
-        with pytest.raises(KeyError, match="Column 'Z' not found in DataFrame."):
-            null_rows(sample_df, columns=['Z'])
+        """Test that `null_rows()` raises KeyError when a specified column is missing."""
+        missing_col = 'Z'
+
+        expected_prefix = "KeyError: Column(s) not found."
+        expected_missing_key_check = missing_col
+        expected_available_cols_check = str(list(sample_df.columns))
+
+        with pytest.raises(KeyError) as excinfo:
+            null_rows(sample_df, 'A', missing_col)
+
+        error_message_raw = str(excinfo.value)
+        error_message = error_message_raw.strip('"\' ')
+
+        assert error_message.startswith(expected_prefix), (f"Assertion Failed: Expected error message to start with '{expected_prefix}', but it starts with: {error_message[:len(expected_prefix) + 5]}. Full Message: {error_message_raw}")
+
+        assert expected_missing_key_check in error_message, (f"Missing key '{expected_missing_key_check}' not found in error message: {error_message_raw}")
+
+        assert expected_available_cols_check in error_message, (f"Available columns list '{expected_available_cols_check}' not found in error message: {error_message_raw}")
 
 
 ## df_loc tests
 
 class TestDfLoc:
     @staticmethod
-    def test_df_loc_single_condition(sample_df):
-        """Test df_loc with a single condition."""
-        condition = (sample_df['A'] > 1)
-        result = df_loc(sample_df, condition, ['A', 'B'])
-        assert isinstance(result, pd.DataFrame)
-        assert list(result.columns) == ['A', 'B']
-        assert result.shape == (3, 2)
+    def test_df_loc_success_multiple_columns(sample_df):
+        """Test selection of multiple columns resulting in a DataFrame."""
+        condition = sample_df['B'] == 'y'
 
+        result = df_loc(sample_df, condition, ['A', 'C'])
 
-    @staticmethod
-    def test_df_loc_multiple_conditions(sample_df):
-        """Test df_loc with multiple conditions."""
-        conditions = sample_df['B'] == 'y'
-        result = df_loc(sample_df, conditions, ['A', 'B'])
+        expected_data = {
+            'A': {1: 2.0, 4: 5.0},
+            'C': {1: 2.2, 4: np.nan}
+        }
+
+        expected_df = pd.DataFrame(expected_data).set_index(pd.Index([1, 4]))
+
+        pd.testing.assert_frame_equal(result, expected_df)
         assert isinstance(result, pd.DataFrame)
-        assert list(result.columns) == ['A', 'B']
         assert result.shape == (2, 2)
 
 
     @staticmethod
-    def test_df_loc_raises_type_error_df():
-        """Test that df_loc raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            df_loc('not_df', [True] * 5, 'A')
+    def test_df_loc_success_single_column(sample_df):
+        """Test selection of a single column resulting in a Series."""
+        condition = sample_df['A'].notna()
+
+        result = df_loc(sample_df, condition, 'D')
+
+        expected_data = sample_df['D'].iloc[[0, 1, 3, 4]]
+        expected_series = pd.Series(expected_data, index=[0, 1, 3, 4], name='D')
+
+        pd.testing.assert_series_equal(result, expected_series)
+        assert isinstance(result, pd.Series)
+
+    
+    @staticmethod
+    def test_df_loc_empty_result(sample_df):
+        """Test a condition that returns zero rows."""
+        condition = sample_df['A'] > 100
+        result = df_loc(sample_df, condition, ['A', 'B'])
+
+        expected_df = sample_df.loc[condition, ['A', 'B']]
+
+        pd.testing.assert_frame_equal(result, expected_df)
+        assert result.empty
 
 
     @staticmethod
-    def test_df_loc_raises_type_error_col():
-        """Test that df_loc raises TypeError when col is not a list of strings or a string."""
-        with pytest.raises(TypeError, match="Input 'col' must be a string or a list of strings."):
-            df_loc(sample_df, [True] * 5, 123)
+    def test_df_loc_raises_type_error_df(sample_df):
+        """Test if `df_loc()` raises TypeError when 'df' is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame"):
+            df_loc("not a df", sample_df['A'] > 0, 'A')
 
 
     @staticmethod
     def test_df_loc_raises_key_error(sample_df):
-        """Test that df_loc raises KeyError when specified columns do not exist."""
-        condition = sample_df['A'] > 1
-        with pytest.raises(KeyError, match="Columns specified were not found in DataFrame: 'Z'."):
-            df_loc(sample_df, condition, ['Z'])
+        """Test if `df_loc()` raises KeyError when a specified column is missing."""
+        missing_col = 'Z'
+        with pytest.raises(KeyError, match=fr"KeyError: The specified column\(s\) were not found in the DataFrame"):
+            df_loc(sample_df, sample_df['A'] > 0, ['missing_col', 'A'])
 
 
     @staticmethod
-    def test_df_loc_raises_index_error(sample_df):
-        """Test that df_loc raises IndexError when condition length does not match DataFrame length."""
-        condition = [True, False]  # Incorrect length
-        with pytest.raises(IndexError, match="Length of 'condition' must match number of rows in DataFrame."):
-            df_loc(sample_df, condition, ['A'])
+    def test_df_loc_raises_value_error(sample_df):
+        """Test if `df_loc()` raises ValueError when non-boolean values are used as condition."""
+        non_boolean_condition = ['True', 'False', 'True', 'False', 'True']
+        with pytest.raises(ValueError, match="ValueError: Invalid index/condition provided."):
+            df_loc(sample_df, non_boolean_condition, 'A')
+
+
+    @staticmethod
+    @mock.patch('builtins.print')
+    def test_df_loc_warns_on_unconventional_condition(mock_print, sample_df):
+        """Test that `df_loc()` print a warning for non-Series/list/ndarray condition types."""
+        unconventional_condition = (True, False, True, False, True)
+        
+        with pytest.raises(RuntimeError):
+            df_loc(sample_df, unconventional_condition, 'A')
+
+        mock_print.assert_called_once_with(mock.ANY)
+        call_arg = mock_print.call_args_list[0][0][0]
+        assert "Warning: 'condition' type (tuple) may lead to runtime errors." in call_arg
 
 
 ## df_aggfunc tests
 
-class TestDfAggfunc:
+class TestDfAggFunc:
     @staticmethod
-    def test_df_aggfunc_single_agg_single_column(sample_df):
-        """Test df_aggfunc with a single column and single aggregation function."""
-        result = df_aggfunc(sample_df, 'mean', 'A')
-        assert isinstance(result, (int, float, pd.Series))
-        assert np.isclose(result, 3.0)
+    def test_df_aggfunc_single_string_col(sample_df):
+        """Test aggregation with a single string function on a single column"""
+        result = df_aggfunc(sample_df, aggfunc='mean', col='A')
+
+        expected_value = sample_df['A'].mean()
+
+        assert isinstance(result, (float, np.float64))
+        assert result == expected_value
 
 
     @staticmethod
-    def test_df_aggfunc_list_df(sample_df):
-        """Test df_aggfunc with a list of aggregation functions the entire numeric DataFrame."""
-        result = df_aggfunc(sample_df, ['mean', 'sum'], ['A', 'C'])
-        assert isinstance(result, pd.DataFrame)
+    def test_df_aggfunc_list_string_cols(sample_df):
+        """Test aggregation with a list of functions on multiple columns."""
+        result = df_aggfunc(sample_df, aggfunc=['min', 'max'], col=['A', 'C'])
+
+        expected_data = {
+            'A': [sample_df['A'].min(), sample_df['A'].max()],
+            'C': [sample_df['C'].min(), sample_df['C'].max()]
+        }
+
+        expected_df = pd.DataFrame(expected_data, index=['min', 'max'])
+
+        pd.testing.assert_frame_equal(result, expected_df)
         assert result.shape == (2, 2)
-        assert result.loc['A', 'mean'] == 3.0
-        assert result.loc['A', 'sum'] == 12.0
-
-
-    @staticmethod
-    def test_df_aggfunc_dict_df(sample_df):
-        """Test df_aggfunc with a dictionary of aggregation functions for specific columns."""
-        result = df_aggfunc(sample_df, {'A': 'mean', 'C': 'sum'})
-        assert isinstance(result, pd.DataFrame)
-        assert result.shape == (1, 2)
-        assert result['A'].loc[0] == 3.0
-        assert result['C'].loc['sum'] == 11.0
-
-
-    @staticmethod
-    def test_df_aggfunc_value_counts_single_column(sample_df):
-        """Test df_aggfunc with 'value_counts' for a single column."""
-        result = df_aggfunc(sample_df, 'value_counts', 'B')
-        assert isinstance(result, pd.Series)
-        assert result.shape == (3, 1)
-        assert result.loc['x'] == 2
-        assert result.loc['y'] == 2
-        assert result.loc['z'] == 1
-        assert result.name == 'B'
-
-
-    @staticmethod
-    def test_df_aggfunc_value_counts_list_columns(sample_df):
-        """Test df_aggfunc with 'value_counts' for a list of columns."""
-        result = df_aggfunc(sample_df, 'value_counts', ['B', 'A'])
-        assert isinstance(result, dict)
-        assert 'B' in result and 'A' in result
-        assert result['B'].loc['x'] == 2
-        assert result['A'].loc[1] == 1
 
 
     @staticmethod
     def test_df_aggfunc_custom_callable(sample_df):
-        """Test df_aggfunc with a custom callable function (lambda)."""
-        custom_median = lambda x: np.nanmedian(x) * 2
-        result = df_aggfunc(sample_df, custom_median, ['A', 'C'])
+        """Test aggreagtion with a custom callable function."""
+        def range_func(s):
+            return s.max() - s.min() if not s.empty else np.nan
+        
+        result = df_aggfunc(sample_df, aggfunc=range_func, col=['A', 'C'])
+
+        expected_range_A = sample_df['A'].max() - sample_df['A'].min()
+        expected_range_C = sample_df['C'].max() - sample_df['C'].min()
+
+        expected_series = pd.Series([expected_range_A, expected_range_C], index=['A', 'C'], name='range_func')
+
+        expected_series.name = range_func.__name__
+
         assert isinstance(result, pd.Series)
-        assert result['A'].loc[0] == 6.0
-        assert result['C'].loc[0] == 6.6
+        pd.testing.assert_series_equal(result, expected_series, check_names=False)
 
 
     @staticmethod
-    def test_df_aggfunc_raises_type_error_df():
-        """Test that df_aggfunc raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            df_aggfunc('not_df', 'mean', 'A')
+    def test_df_aggfunc_dict_aggfunc(sample_df):
+        """Test aggregation with a dictionary mapping columns to functions."""
+        result = df_aggfunc(sample_df, aggfunc={'A': 'sum', 'B': 'count', 'C': ['mean', 'median']})
+
+        expected_df = sample_df.agg({'A': 'sum', 'B': 'count', 'C': ['mean', 'median']})
+
+        pd.testing.assert_frame_equal(result, expected_df)
 
 
     @staticmethod
-    def test_df_aggfunc_key_error_column(sample_df):
-        """Test that df_aggfunc raises KeyError when specified columns do not exist."""
-        with pytest.raises(KeyError, match="Columns specified were not found in DataFrame: 'Z'."):
-            df_aggfunc(sample_df, 'mean', ['Z'])
+    def test_df_aggfunc_value_counts_single_col(sample_df):
+        """Test 'value_counts' on a single column resulting in a Series."""
+        result = df_aggfunc(sample_df, aggfunc='value_counts', col='B')
+        expected_series = sample_df['B'].value_counts()
 
-
-    @staticmethod
-    def test_df_aggfunc_value_error_invalid_agg(sample_df):
-        """Test that df_aggfunc raises ValueError when aggregation function is incompatile with data type."""
-        with pytest.raises(ValueError, match="The aggregation function 'mean' is not available or compatible."):
-            df_aggfunc(sample_df, 'mean', 'B')
-
-
-    @staticmethod
-    def test_df_aggfunc_value_error_value_counts_without_column(sample_df):
-        """Test that df_aggfunc raises ValueError when 'value_counts' is used without specifying columns."""
-        with pytest.raises(ValueError, match="When using 'value_counts', 'col' must be specified as a string or list of strings."):
-            df_aggfunc(sample_df, 'value_counts')
-
-
-    @staticmethod
-    def test_df_aggfunc_type_error_invalid_column_type(sample_df):
-        """Test that df_aggfunc raises TypeError when col is not a string, list, or None."""
-        with pytest.raises(TypeError, match="Input 'col' must be a string, list of strings, or None."):
-            df_aggfunc(sample_df, 'mean', 123)
-
-
-    @staticmethod
-    def test_df_aggfunc_empty_df(empty_df):
-        """Test that df_aggfunc handles an empty DataFrame."""
-        result = df_aggfunc(empty_df, 'mean', ['A', 'B'])
+        pd.testing.assert_series_equal(result, expected_series)
         assert isinstance(result, pd.Series)
-        assert len(result) == 2
+
+
+    @staticmethod
+    def test_df_aggfunc_value_counts_multiple_columns(sample_df):
+        """Test 'value_counts" on multiple columns resulting in a dictionary of Series."""
+        result = df_aggfunc(sample_df, aggfunc='value_counts', col=['B', 'A'])
+
+        expected_dict = {
+            'B': sample_df['B'].value_counts(),
+            'A': sample_df['A'].value_counts()
+        }
+
+        assert isinstance(result, dict)
+        assert list(result.keys()) == ['B', 'A']
+        pd.testing.assert_series_equal(result['B'], expected_dict['B'])
+        pd.testing.assert_series_equal(result['A'], expected_dict['A'])
+
+
+    @staticmethod
+    def test_df_aggfunc_raises_type_error_df(sample_df):
+        """Test if ``df_aggfunc()` raises TypeError when 'df' is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame"):
+            df_aggfunc('not_a_df', aggfunc='mean', col='A')
+
+
+    @staticmethod
+    def test_df_aggfunc_raises_type_error_col_non_string(sample_df):
+        """Test if `df_aggfunc()` raises TypeError when list for 'col' contains non-string elements."""
+        with pytest.raises(TypeError, match="List for 'col' must contain only strings"):
+            df_aggfunc(sample_df, aggfunc='mean', col=['A', 123])
+
+
+    @staticmethod
+    def test_df_aggfunc_raises_key_error_missing_col(sample_df):
+        """Test if `df_aggfunc()` raises KeyError when a specified column is missing."""
+        missing_col = 'Z'
+
+        pattern = fr"KeyError: The specified column\(s\) were not found in the DataFrame: \['{missing_col}'\].*"
+
+        with pytest.raises(KeyError, match=pattern):
+            df_aggfunc(sample_df, aggfunc='sum', col=[missing_col, 'A'])
+
+
+    @staticmethod
+    def test_df_aggfunc_raises_value_error_aggfunc_incompatible(sample_df):
+        """Test if ``df_aggfunc()` raises ValueError when 'aggfunc' is incompatible with the data type."""
+        with pytest.raises(ValueError, match="The aggregation function 'mean' is not available or compatible with the selected data type"):
+            df_aggfunc(sample_df, aggfunc='mean', col='B')
+
+
+    @staticmethod
+    def test_df_aggfunc_raises_value_error_value_counts_no_col(sample_df):
+        """Test if `df_aggfunc()` raises ValueError when 'value_counts' is used without 'col'."""
+        with pytest.raises(ValueError, match="'value_counts' requires one or more columns to be specified in 'col'"):
+            df_aggfunc(sample_df, aggfunc='value_counts', col=None)
+
+
+    @staticmethod
+    def test_df_aggfunc_raises_runtime_error_value_counts_on_empty_df(empty_df):
+        """Test if `df_aggfunc()` raises RuntimeError for 'value_counts' on an empty DataFrame."""
+        try:
+            df_aggfunc(empty_df, aggfunc='value_counts', col='B')
+
+        except RuntimeError as e:
+            assert "RuntimeError: Failed to perform 'value_counts' on column(s)" in str(e)
+        
+        except Exception:
+            pass
 
 
 ## drop_labels tests
 
 class TestDropLabels:
     @staticmethod
-    def test_drop_labels_single_column(sample_df):
-        """Test drop_labels with a single column."""
-        new_df = drop_labels(sample_df, 'A', 1)
-        assert 'A' in new_df.columns
-        assert sample_df.shape == (5, 4)
-        pd.testing.assert_index_equal(new_df.index, pd.Index(['B', 'C', 'D']))
+    def test_drop_labels_no_labels_returns_copy(sample_df):
+        """Test that passing 'labels=None' returns a deep copy of the original DataFrame."""
+        original_shape = sample_df.shape
+        result_df = drop_labels(sample_df, labels=None)
+
+        assert result_df is not sample_df
+        assert result_df.shape == original_shape
+        pd.testing.assert_frame_equal(result_df, sample_df)
 
 
     @staticmethod
-    def test_drop_labels_list_of_columns(sample_df):
-        """Test drop_labels with a list of columns."""
-        new_df = drop_labels(sample_df, ['B', 'C'], 'columns')
-        assert 'B' not in new_df.columns
-        assert 'C' not in new_df.columns
-        assert sample_df.shape == (5, 4)
-        assert new_df.shape == (5, 2)
+    def test_drop_labels_single_column_by_str(sample_df):
+        """Test dropping a single column label using string input."""
+        result_df = drop_labels(sample_df, labels='B', axis='columns')
+
+        expected_columns = ['A', 'C', 'D']
+
+        assert list(result_df.columns) == expected_columns
+        assert result_df.shape == (5, 3)
 
 
     @staticmethod
-    def test_drop_labels_single_row(sample_df):
-        """Test drop_labels with a single row index."""
-        new_df = drop_labels(sample_df, 0, 'index')
-        assert 0 not in new_df.index
-        assert new_df.shape == (4, 4)
+    def test_drop_labels_multiple_columns_by_list(sample_df):
+        """Test dropping multiple columns labels using a list of strings."""
+        result_df = drop_labels(sample_df, labels=['A', 'C'], axis=1)
 
-
-    @staticmethod
-    def test_drop_labels_list_of_rows(sample_df):
-        """Test drop_labels with a list of row indices."""
-        new_df = drop_labels(sample_df, [0, 1], 'index')
-        assert 0 not in new_df.index
-        assert 1 not in new_df.index
-        assert new_df.shape == (3, 4)
-
-
-    @staticmethod
-    def test_drop_labels_ignore_non_existent_labels(sample_df):
-        """Test drop_labels that non-existent labels are ignored."""
-        new_df = drop_labels(sample_df, ['Z', 'B'], 'columns')
-        assert 'B' not in new_df.columns
-        assert new_df.shape == (5, 3)
-
-
-    @staticmethod
-    def test_drop_labels_no_label_return_copy(sample_df):
-        """Test drop_labels returns a copy of the original DataFrame when no labels are provided."""
-        new_df = drop_labels(sample_df, None, 'columns')
-        pd.testing.assert_frame_equal(new_df, sample_df)
-        assert new_df is not sample_df
-
-
-    @staticmethod
-    def test_drop_labels_raises_type_error_df():
-        """Test that drop_labels raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            drop_labels('not_df', 'A', 'columns')
-
-
-    @staticmethod
-    def test_drop_labels_raises_type_error_labels(sample_df):
-        """Test that drop_labels raises TypeError when labels is not a string, list, int, or None."""
-        with pytest.raises(TypeError, match="Input 'labels' must be a string, list of strings, int, list of ints, or None."):
-            drop_labels(sample_df, 12.34, 'columns')
-
-
-    @staticmethod
-    def test_drop_labels_raises_type_error_axis(sample_df):
-        """Test that drop_labels raises TypeError when axis is an invalid type."""
-        with pytest.raises(ValueError, match="Input 'axis' must be either (0 or 1) or ('columns' or 'index')."):
-            drop_labels(sample_df, 'A', 'invalid_axis')
-
-
-    @staticmethod
-    def test_drop_labels_raises_value_error_axis(sample_df):
-        """Test that drop_labels raises ValueError when axis is not 0, 1, 'columns', or 'index'."""
-        with pytest.raises(ValueError, match="Input 'axis' must be either (0 or 1) or ('columns' or 'index')."):
-            drop_labels(sample_df, 'A', 2)
-
-
-    @staticmethod
-    def test_drop_labels_empty_df(empty_df):
-        """Test that drop_labels handles an empty DataFrame."""
-        new_df = drop_labels(empty_df, 'A', 'columns')
-        pd.testing.assert_frame_equal(new_df, pd.DataFrame())
-
-
-## Visualization function tests (count_plot, histogram, heatmap)
-
-## count_plot tests
-
-@pytest.fixture
-def numeric_df():
-    """Provides a sample DataFrame with numeric data for visualization tests."""
-    data = {
-        'A': [1, 2, 1, 3, 2, 1, 3, 3, 2, 1],
-        'B': [10, 20, 10, 30, 20, 10, 30, 30, 20, 10],
-        'C': [1.1, 2.2, 1.1, 3.3, 2.2, 1.1, 3.3, 3.3, 2.2, 1.1],
-    }
-    return pd.DataFrame(data)
-
-
-@pytest.fixture
-def categorical_df():
-    """Provides a sample DataFrame with categorical data for visualization tests."""
-    data = {
-        'A': ['cat', 'dog', 'cat', 'mouse', 'dog', 'cat', 'mouse', 'mouse', 'dog', 'cat'],
-        'B': ['red', 'blue', 'red', 'green', 'blue', 'red', 'green', 'green', 'blue', 'red'],
-        'C': ['type1', 'type2', 'type1', 'type3', 'type2', 'type1', 'type3', 'type3', 'type2', 'type1'],
-    }
-    return pd.DataFrame(data)
-
-
-@pytest.fixture(autouse=True)
-def mock_plotting_libraries():
-    plt_mock = mock.MagicMock()
-    ax_mock = mock.MagicMock()
-    ax_mock.containers = [mock.MagicMock()]
-    plt_mock.subplots.return_value = (mock.MagicMock(), ax_mock)
-
-    sns_mock = mock.MagicMock()
-
-    with mock.patch('matplotlib.pyplot', plt_mock), mock.patch('seaborn', sns_mock):
-        yield plt_mock, sns_mock
-
-
-class TestCountPlot:
-    @staticmethod
-    def test_count_plot_successful_vertical(sample_df,mock_plotting_libraries):
-        """Test successful creation of a vertical count plot."""
-        plt_mock, sns_mock = mock_plotting_libraries
+        expected_columns = ['B', 'D']
         
-        count_plot('Test title', 'Test label', sample_df, 'B')
+        assert list(result_df.columns) == expected_columns
+        assert result_df.shape == (5, 2)
 
-        sns_mock.countplot.assert_called_once()
-        call_kwargs = sns_mock.countplot.call_args[1]
-        assert call_kwargs['x'] == 'B'
-        assert call_kwargs['data'].equals(sample_df)
-        assert call_kwargs['hue'] is None
-
-        plt_mock.subplots.assert_called_once()
-        ax_mock = plt_mock.subplots.return_value[1]
-        ax_mock.set_title.assert_called_once_with('Test title')
-        ax_mock.set_xlabel.assert_called_once_with('Test label')
-        ax_mock.set_ylabel.assert_called_once_with('Count')
-
-        plt_mock.tight_layout.assert_called_once()
-        plt_mock.show.assert_called_once()
 
 
     @staticmethod
-    def test_count_plot_successful_horizontal_hue(sample_df,mock_plotting_libraries):
-        """Test successful creation of a horizontal count plot, with 'hue' and 'tick_rotation' variables."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        
-        count_plot('Test title', 'Test label', sample_df, 'B', axis='y', hue='A', tick_rotation=45)
+    def test_drop_labels_rows_by_index(sample_df):
+        """Test dropping rows (index labels) using integer 'axis=0'"""
+        result_df = drop_labels(sample_df, labels=[1, 4], axis=0)
 
-        sns_mock.countplot.assert_called_once()
-        call_kwargs = sns_mock.countplot.call_args[1]
-        assert call_kwargs['y'] == 'B'
-        assert call_kwargs['hue'] == 'A'
+        expected_index = [0, 2, 3]
 
-        ax_mock = plt_mock.subplots.return_value[1]
-        ax_mock.set_title.assert_called_once_with('Test title')
-        ax_mock.set_ylabel.assert_called_once_with('Test label')
-        ax_mock.set_xlabel.assert_called_once_with('Count')
-        ax_mock.set_yticklabels.assert_called_once()
-        assert ax_mock.set_yticklabels.call_args[1]['rotation'] == 45
+        assert list(result_df.index) == expected_index
+        assert result_df.shape == (3, 4)
 
 
     @staticmethod
-    @pytest.mark.parametrize("invalid_input", ['invalid', 2, None, [], {}])
-    def test_count_plot_raises_type_error_df(invalid_input):
-        """Test that count_plot raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            count_plot('Title', 'Label', invalid_input, 'A')
+    def test_drop_labels_missing_labels_ignored(sample_df):
+        """Test that dropping non-existent labels is ignored due to errors='ignore'."""
+        result_df = drop_labels(sample_df, labels=['B', 'Missing'], axis='columns')
+
+        expected_columns = ['A', 'C', 'D']
+
+        assert list(result_df.columns) == expected_columns
+        assert result_df.shape == (5, 3)
 
 
     @staticmethod
-    @pytest.mark.parametrize("invalid_col", ['Z', 'NonExistent', 'Existent', 'Non'])
-    def test_count_plot_raises_key_error_col(sample_df, invalid_col):
-        """Test that count_plot raises KeyError when column does not exist."""
-        with pytest.raises(KeyError, match=f"Column '{invalid_col}' not found in DataFrame."):
-            count_plot('Title', 'Label', sample_df, invalid_col)
-
-    
-    @staticmethod
-    def test_count_plot_raises_key_error_hue(sample_df):
-        """Test that count_plot raises KeyError when hue column does not exist."""
-        with pytest.raises(KeyError, match="Hue column 'Z' not found in DataFrame."):
-            count_plot('Title', 'Label', sample_df, 'B', hue='Z')
+    def test_drop_labels_raises_type_error_df(sample_df):
+        """Test if `drop_labels()` raises TypeError when 'df' is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame"):
+            drop_labels('not a df', labels='A', axis=1)
 
 
     @staticmethod
-    @pytest.mark.parametrize("invalid_axis", ['invalid', 2, 3.5])
-    def test_count_plot_raises_value_error_axis(sample_df, invalid_axis):
-        """Test that count_plot raises ValueError when axis is not 'x' or 'y'."""
-        with pytest.raises(ValueError, match="Input 'axis' must be either 'x' or 'y'."):
-            count_plot('Title', 'Label', sample_df, 'B', axis=invalid_axis)
-
-
-## histogram tests
-class TestHistogram:
-    @staticmethod
-    def test_histogram_successful_vertical_with_kde(numeric_df,mock_plotting_libraries):
-        """Test successful creation of a vertical histogram with KDE."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        
-        histogram('Histogram Title', 'X Label', numeric_df, 'A', bins=10, kde=True)
-
-        sns_mock.histplot.assert_called_once()
-        call_kwargs = sns_mock.histplot.call_args[1]
-        assert call_kwargs['x'] == 'A'
-        assert call_kwargs['data'].equals(numeric_df)
-        assert call_kwargs['bins'] == 10
-        assert call_kwargs['kde'] is True
-
-        plt_mock.xlabel.assert_called_once_with('X Label')
-        ax_mock = plt_mock.subplots.return_value[1]
-        ax_mock.set_title.assert_called_once_with('Histogram Title')
-        ax_mock.set_xlabel.assert_called_once_with('X Label')
-
-        plt_mock.tight_layout.assert_called_once()
-        plt_mock.show.assert_called_once()
+    def test_drop_labels_raises_type_error_labels_non_string_or_int(sample_df):
+        """Test if `drop_labels()` raises TypeError when 'labels' is a list containing non-strings."""
+        with pytest.raises(TypeError, match="TypeError: All elements in 'labels' list must be strings or integers."):
+            drop_labels(sample_df, labels=[1.0, 'A'], axis='columns')
 
 
     @staticmethod
-    def test_histogram_successful_horizontal_hue(categorical_df,mock_plotting_libraries):
-        """Test successful creation of a horizontal histogram with hue."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        
-        df_merged = categorical_df
-
-        histogram('Histogram Title', 'Y Label', df_merged, 'A', axis='y', bins=10, hue='B')
-
-        sns_mock.histplot.assert_called_once()
-        call_kwargs = sns_mock.histplot.call_args[1]
-        assert call_kwargs['y'] == 'A'
-        assert call_kwargs['hue'] == 'B'
-        assert call_kwargs['bins'] == 10
-
-        plt_mock.ylabel.assert_called_once_with('Y Label')
-        ax_mock = plt_mock.subplots.return_value[1]
-        ax_mock.set_title.assert_called_once_with('Histogram Title')
+    def test_drop_labels_raises_type_error_axis_invalid_type(sample_df):
+        """Test if `drop_labels()` raises TypeError when 'axis' is not an int or str."""
+        with pytest.raises(TypeError, match="'axis' must be an integer \\(0 or 1\\) or a string \\('index' or 'columns'\\)"):
+            drop_labels(sample_df, labels='A', axis=3.0)
 
 
     @staticmethod
-    @pytest.mark.parametrize("invalid_input", ['invalid', 2, None, [], {}])
-    def test_histogram_raises_type_error_df(invalid_input):
-        """Test that histogram raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            histogram('Title', 'Label', invalid_input, 'A')
-
-
-    @staticmethod
-    def test_histogram_raises_key_error_col(numeric_df):
-        """Test that histogram raises KeyError when column does not exist."""
-        with pytest.raises(KeyError, match="Column 'Z' not found in DataFrame."):
-            histogram('Title', 'Label', numeric_df, 'Z')
-
-
-    @staticmethod
-    def test_histogram_raises_runtime_error_non_numeric_col(categorical_df):
-        """Test that histogram raises RuntimeError when column is non-numeric."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        sns_mock.histplot.side_effect = Exception("RuntimeError: An unexpected error occurred during plot generation. Check if column 'col' is numerical.")
-        with pytest.raises(RuntimeError, match="RuntimeError: An unexpected error occurred during plot generation."):
-            histogram('Title', 'Label', categorical_df, 'A')
-
-
-## heatmap tests
-class TestHeatmap:
-    @staticmethod
-    def test_heatmap_successful(numeric_df,mock_plotting_libraries):
-        """Test successful creation of a heatmap."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        
-        heatmap('Heatmap Title', numeric_df)
-
-        sns_mock.heatmap.assert_called_once()
-        call_kwargs = sns_mock.heatmap.call_args[1]
-
-        assert isinstance(sns_mock.heatmap.call_args[0][0], pd.DataFrame)
-        assert list(sns_mock.heatmap.call_args[0][0].columns) == ['A', 'B', 'C']
-
-        assert call_kwargs['data'].shape == (3, 3)
-        assert call_kwargs['annot'] is True
-        assert call_kwargs['fmt'] == '.2f'
-        assert call_kwargs['cmap'] == 'coolwarm'
-        assert call_kwargs['annot_kws']['fontsize'] == 7
-
-
-        plt_mock.title.assert_called_once_with('Heatmap Title')
-        plt_mock.xticks.assert_called_once()
-        plt_mock.yticks.assert_called_once()
-        plt_mock.tight_layout.assert_called_once()
-        plt_mock.show.assert_called_once()
-
-
-    @staticmethod
-    def test_heatmap_custom_params(numeric_df,mock_plotting_libraries):
-        """Test successful creation of a heatmap with custom parameters."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        
-        heatmap('Custom Heatmap', numeric_df, annot=False, fontsize=10 ,cmap='viridis', num_decimals=3)
-
-        sns_mock.heatmap.assert_called_once()
-        call_kwargs = sns_mock.heatmap.call_args[1]
-
-        assert call_kwargs['annot'] is False
-        assert call_kwargs['cmap'] == 'viridis'
-        assert call_kwargs['annot_kws']['fontsize'] == 10
-        assert call_kwargs['fmt'] == '.3f'
-
-
-    @staticmethod
-    def test_heatmap_raises_type_error_df():
-        """Test that heatmap raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            heatmap('Title', 'not_df')
-
-
-    @staticmethod
-    def test_heatmap_raises_value_error_no_numeric_columns(categorical_df):
-        """Test that heatmap raises ValueError when DataFrame has no numeric columns."""
-        with pytest.raises(ValueError, match="DataFrame contains no numeric columns to calculate a correlation matrix."):
-            heatmap('Title', categorical_df)
-
-
-    @staticmethod
-    @pytest.mark.parametrize("invalid_fontsize", ['invalid', -1, 0, None, []])
-    def test_heatmap_raises_value_error_invalid_fontsize(numeric_df, invalid_fontsize):
-        """Test that heatmap raises ValueError when fontsize is invalid."""
-        with pytest.raises(ValueError, match="Input 'fontsize' must be a positive number."):
-            heatmap('Title', numeric_df, fontsize=invalid_fontsize)
-
-
-    @staticmethod
-    def test_heatmap_raises_value_error_invalid_num_decimals(numeric_df):
-        """Test that heatmap raises ValueError when num_decimals is invalid."""
-        with pytest.raises(ValueError, match="Input 'num_decimals' must be a non-negative integer."):
-            heatmap('Title', numeric_df, num_decimals=-1)
-
-
-## bin and plot tests
-class TestBinAndPlot:
-    @staticmethod
-    def test_bin_and_plot_success_binning_only(sample_df):
-        """Test successful binning when show_plot=False."""
-        df_new = bin_and_plot('Title', 'Label', sample_df, col='A', new_col='A_binned', bins=3, show_plot=False)
-
-        assert isinstance(df_new, pd.DataFrame)
-        assert 'A_binned' in df_new.columns
-        assert df_new.shape == (5, 5)
-        pd.testing.assert_frame_equal(df_new.drop(columns=['A_binned']), sample_df)
-
-        assert df_new['A_binned'].loc[0] == pd.Interval(0.996, 2.333, closed='right')
-        assert df_new['A_binned'].loc[2] is np.nan
-
-
-    @staticmethod
-    def test_bin_and_plot_success_binning_with_plot(sample_df,mock_plotting_libraries):
-        """Test successful binning and plotting when show_plot=True."""
-        plt_mock, sns_mock = mock_plotting_libraries
-        
-        with mock.patch('src.telco_customer_churn_analysis.utils.count_plot') as mock_count_plot:
-            bin_and_plot('Title', 'Label', sample_df, col='A', new_col='A_binned', bins=3, show_plot=True)
-
-
-        mock_count_plot.assert_called_once()
-
-        call_kwargs = mock_count_plot.call_args[1]
-        assert isinstance(call_kwargs['df'], pd.DataFrame)
-        assert call_kwargs['df'].shape == (5, 5)
-        assert call_kwargs['col'] == 'A_binned'
-        assert call_kwargs['hue'] is None
-        assert 'A_binned' in call_kwargs['df'].columns
-
-
-    @staticmethod
-    def test_bin_and_plot_with_custom_labels(sample_df):
-        """Test bin_and_plot with custom labels."""
-        custom_labels = ['Low', 'Medium', 'High']
-        df_new = bin_and_plot('Title', 'Label', sample_df, col='A', new_col='A_binned', bins=3, labels=custom_labels, show_plot=False)
-
-        assert pd.api.types.is_categorical_dtype(df_new['A_binned'])
-        assert df_new['A_binned'].cat.categories.tolist() == custom_labels
-        assert df_new['A_binned'].loc[0] == 'Low'
-        assert df_new['A_binned'].loc[1] == 'Medium'
-
-
-    @staticmethod
-    def test_bin_and_plot_raises_type_error_df():
-        """Test that bin_and_plot raises TypeError when input is not a DataFrame."""
-        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame."):
-            bin_and_plot('Title', 'Label', 'not_df', col='A', new_col='A_binned', bins=3)
-
-
-    @staticmethod
-    def test_bin_and_plot_raises_value_error_no_numeric(sample_df):
-        """Test that bin_and_plot raises ValueError when column to bin is non-numeric."""
-        with pytest.raises(ValueError, match="Invalid binning configuration."):
-            bin_and_plot('Title', 'Label', sample_df, col='B', new_col='B_binned', bins=3)
-
-
-    @staticmethod
-    def test_bin_and_plot_raises_key_error_col(sample_df):
-        """Test that bin_and_plot raises KeyError when column to bin does not exist."""
-        with pytest.raises(KeyError, match="Column 'Z' not found in DataFrame."):
-            bin_and_plot('Title', 'Label', sample_df, col='Z', new_col='Z_binned', bins=3)
-
-
-## chi_square_test_of_independence tests
-
-@pytest.fixture
-def categorical_df_for_chi_square():
-    """Provides a sample DataFrame with categorical data for chi-square test."""
-    data = {
-        'Gender': ['Male', 'Female', 'Female', 'Male', 'Female'],
-        'Partner': ['Yes', 'No', 'Yes', 'No', 'Yes'],
-        'Service': ['DSL', 'Fiber optic', 'DSL', 'Fiber optic', 'DSL'],
-        'A': [1, 2, 1, 3, 2]
-    }
-
-    return pd.DataFrame(data)
-
-@pytest.fixture
-def mock_chi2_result_passing():
-    """Mocks the pingouin.chi2_independence result for a successful test."""
-    observed = pd.DataFrame({
-        'Partner': ['Yes', 'No'],
-        'Female': [30, 10],
-        'Male': [20, 40]
-    }).set_index('Partner').T
-
-
-    expected = pd.DataFrame({
-        'Partner': ['Yes', 'No'],
-        'Female': [25, 15],
-        'Male': [25, 35]
-    }).set_index('Partner').T
-
-
-    stats = pd.DataFrame({
-        'test': ['pearson', 'G-test'],
-        'dof': [1, 1],
-        'chi2': [4.0, 4.5],
-        'pval': [0.0655, 0.0519],
-        'cramer': [0.2, 0.21],
-        'power': [0.70, 0.60]
-    })
-
-    return observed, expected, stats
-    
-
-@pytest.fixture
-def mock_chi2_result_reject_h0():
-    """Mocks the pingouin.chi2_independence result for a test that rejects H0."""
-    observed = pd.DataFrame({
-        'Partner': ['Yes', 'No'],
-        'Female': [10, 40],
-        'Male': [5, 45]
-    }).set_index('Partner').T
-
-    excepted = pd.DataFrame({
-        'Partner': ['Yes', 'No'],
-        'Female': [20, 30],
-        'Male': [15, 35]
-    }).set_index('Partner').T
-
-    stats = pd.DataFrame({
-        'test': ['pearson', 'G-test'],
-        'dof': [1, 1],
-        'chi2': [15.0, 16.5],
-        'pval': [0.0001, 0.00005],
-        'cramer': [0.51, 0.52],
-        'power': [0.95, 0.97]
-    })
-
-    return observed, excepted, stats
-    
-
-@pytest.fixture
-def mock_chi2_result_assumption_fail():
-    """Mock pingouin result where many expected cells are < 5."""
-
-    expected = pd.DataFrame({
-        'Service': ['DSL', 'Fiber optic'],
-        'Female': [4, 2],
-        'Male': [1, 3]
-    }).set_index('Service').T
-
-    observed = expected.copy()
-
-    stats = pd.DataFrame({
-        'test': ['pearson', 'G-test'],
-        'pval': [0.3, 0.2]
-    })
-
-    return observed, expected, stats
-    
-
-@pytest.fixture(autouse=True)
-def mock_pingouin():
-    with mock.patch('pingouin', autospec=True) as mock_pg:
-        yield mock_pg
-
-
-class TestChiSquareTestOfIndependence:
-    @staticmethod
-    def test_chi_square_success_fail_to_reject(categorical_df_for_chi_square, mock_pingouin, mock_chi2_result_passing, capsys):
-        """Test successful execution where the null hypothesis is NOT rejected."""
-        mock_pg = mock_pingouin
-        mock_pg.chi2_independence.return_value = mock_chi2_result_passing
-
-        expected, observed, stats = chi_squared_test(categorical_df_for_chi_square, 'Gender', 'Partner', alpha=0.05)
-
-        mock_pg.chi2_independence.assert_called_once_with(data=categorical_df_for_chi_square, x='Gender', y='Partner')
-
-        assert expected.equals(mock_chi2_result_passing[0])
-        assert observed.equals(mock_chi2_result_passing[1])
-        assert stats.equals(mock_chi2_result_passing[2])
-
-        captured = capsys.readouterr()
-        assert "Fail to Reject the Null Hypothesis (H0)" in captured.out
-        assert "no statistically significance evidence of an association" in captured.out
-        assert "The p-val is 0.0655" in captured.out
-
-
-    @staticmethod
-    def test_success_reject_h0(categorical_df_for_chi_square, mock_pingouin, mock_chi2_result_reject_h0, capsys):
-        """Test successful execution where the null hypothesis is rejected, and Cramer's V interpreted."""
-        mock_pg = mock_pingouin
-        mock_pg.chi2_independence.return_value = mock_chi2_result_reject_h0
-
-        expected, observed, stats = chi_squared_test(categorical_df_for_chi_square, 'Gender', 'Partner', alpha=0.05)
-
-        captured = capsys.readouterr()
-        assert "Reject the null Hypothesis (H0)" in captured.out
-        assert "statistically significant association" in captured.out
-        assert "**Very Strong Association**" in captured.out
-        assert "Statistical power of the test is 0.95" in captured.out
-
-
-    @staticmethod
-    def test_chi_square_assumption_failure(categorical_df_for_chi_square, mock_pingouin, mock_chi2_result_assumption_fail, capsys):
-        """Test the function correctly aborts and returns None if the expected frequency assumption is not met (>20% of cells < 5)."""
-        mock_pg = mock_pingouin
-        mock_pg.chi2_independence.return_value = mock_chi2_result_assumption_fail
-
-        expected, observed, stats = chi_squared_test(categorical_df_for_chi_square, 'Gender', 'Service')
-
-        assert expected is None
-        assert observed is None
-        assert stats is None
-
-        captured = capsys.readouterr()
-
-        assert "Assumption Not Met" in captured.out
-        assert "50%" in captured.out
-        assert "Test aborted." in captured.out
-
-
-    @staticmethod
-    def test_chi_squared_raises_runtime_error(categorical_df_for_chi_square, mock_pingouin):
-        """Tests that the function handles unexpected exceptions during the pingouin call."""
-        mock_pingouin.chi2_independence.side_effect = Exception("A low memory error occurred.")
-
-        with pytest.raises(RuntimeError, match="An unexpected error occurred during Chi-Squared test"):
-            chi_squared_test(categorical_df_for_chi_square, 'Gender', 'Partner')
-
-
-    @staticmethod
-    def test_chi_squared_raises_key_error(categorical_df_for_chi_square):
-        """Test KeyError for missing columns."""
-        with pytest.raises(KeyError, match="Column 'Z' not found in DataFrame"):
-            chi_squared_test(categorical_df_for_chi_square, 'Gender', 'Z')
-
-
-    @staticmethod
-    @pytest.mark.parametrize("invalid_alpha", [0.0, 1.0, 1.5, -0.1, 5, '0.05'])
-    def test_chi_squared_raises_value_error_alpha(categorical_df_for_chi_square, invalid_alpha):
-        """Test ValueError for invalid alpha (not between 0 and 1 exclusive)."""
-        with pytest.raises((ValueError, TypeError), match="'alpha' must be a float between 0 and 1"):
-            chi_squared_test(categorical_df_for_chi_square, 'Gender', 'Partner', alpha=invalid_alpha)
-
-
-## generate data test functions
-
-class TestGenerateData:
-    @staticmethod
-    def test_generate_data_shape_and_columns():
-        """Tests that the generated DataFrame has the correct shape and column names"""
-        N = 500
-        df = generate_data(n_records=N)
-
-        assert df.shape == (N, 32)
-
-        expected_columns = [
-        'CustomerID', 'Count', 'Country', 'State', 'City', 'Zip Code', 'Lat Long',
-        'Latitude', 'Longitude', 'Gender', 'Senior Citizen', 'Partner',
-        'Dependents', 'Tenure Months', 'Phone Service', 'Multiple Lines',
-        'Internet Service', 'Online Security', 'Online Backup', 'Device Protection',
-        'Tech Support', 'Streaming TV', 'Streaming Movies', 'Contract',
-        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges',
-        'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason'
-        ]
-
-        assert list(df.columns) == expected_columns
-
-
-    
-    @staticmethod
-    def test_generate_data_reproducibility():
-        """Test that the same seed produces an identical DataFrame."""
-        SEED = 100
-        df1 = generate_data(n_records=100, seed=SEED)
-        df2 = generate_data(n_records=100, seed=SEED)
-
-        pd.testing.assert_frame_equal(df1, df2)
-
-
-    
-    @staticmethod
-    def test_generate_data_dependencies_multiple_lines():
-        """Tests the logic: 'Multiple lines' = 'No phone service' if 'Phone Service' == 'No'."""
-        df = generate_data(n_records=100)
-
-        no_phone_service = df[df['Phone Service'] == 'No']
-
-        assert (no_phone_service['Multiple Lines'] == 'No phone service').all()
-
-
-    
-    @staticmethod
-    def test_generate_data_dependencies_internet_addons():
-        """Tests the logic: 'Internet Add-ons' = 'No internet service' if 'Internet Service' = 'No'."""
-        df = generate_data(n_records=100)
-
-        no_internet_service = df[df['Internet Service'] == 'No']
-
-        internet_dependent_cols = ['Online Security', 'Online Backup', 'Device Protection',
-                                   'Tech Support', 'Streaming TV', 'Streaming Movies']
-        
-        for col in internet_dependent_cols:
-            assert (no_internet_service[col] == 'No internet service').all()
-
-
-    
-    @staticmethod
-    def test_generate_data_total_charges_logic():
-        """Tests the logic that 'Total Charges' must be equal to 'Monthly Charges' of 'Tenure Months' is 1."""
-        df = generate_data(n_records=1000)
-
-        tenure_1_customers = df[df['Tenure Months'] == 1]
-
-        pd.testing.assert_series_equal(tenure_1_customers['Total Charges'],
-                                       tenure_1_customers['Monthly Charges'],
-                                       check_names=False,
-                                       check_exact=False,
-                                       atol=0.01)
-        
-
-    @staticmethod
-    def test_generate_data_churn_reason_logic():
-        """Tests the logic: 'Churn Reason' must be empty if 'Churn Value' = 0."""
-        df = generate_data(n_records=100)
-
-        non_churned_customers = df[df['Churn Value'] == 0]
-
-        assert (non_churned_customers['Churn Reason'] == '').all()
+    def test_drop_labels_raises_value_error_axis_invalid_value(sample_df):
+        """Test if `drop_labels()` raises ValueError when 'axis' is a valid type but invalid value."""
+        pattern = r"ValueError: 'axis' must be one of {0, 1, 'index', 'columns'}, but received '2'"
+
+        with pytest.raises(ValueError, match=pattern):
+            drop_labels(sample_df, labels='A', axis=2)

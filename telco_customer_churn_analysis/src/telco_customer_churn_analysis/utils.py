@@ -111,9 +111,9 @@ def df_head(df: pd.DataFrame, n_rows: int = 5) -> Tuple[pd.DataFrame, pd.DataFra
     """
     Analyzes and displays a summary of a pandas DataFrame's structure and contents.
 
-    This function provides a quick overview by displaying the first N rows,
-    the column data types and non-null counts, and descriptive statistics
-    for numerical columns.
+    This function provides a quick overview by displaying the first N rows,
+    the column data types and non-null counts, and descriptive statistics
+    for purely numerical columns (excluding datetime types).
 
     Parameters
     ----------
@@ -127,7 +127,7 @@ def df_head(df: pd.DataFrame, n_rows: int = 5) -> Tuple[pd.DataFrame, pd.DataFra
     tuple
         A tuple containing two pandas DataFrames:
         1. df.head(n_rows): The first N rows of the DataFrame.
-        2. df.describe(): Descriptive statistics of the DataFrame.
+        2. df.describe(): Descriptive statistics of the DataFrame, calculated only for numeric columns. 
 
     Raises
     ------
@@ -166,7 +166,8 @@ def df_head(df: pd.DataFrame, n_rows: int = 5) -> Tuple[pd.DataFrame, pd.DataFra
 
     print('--- Summary Description of DataFrame ---\n')
     try:
-        df_describe = safe_display(df.describe())
+        numeric_df = df.select_dtypes(include=np.number, exclude=np.datetime64)
+        df_describe = safe_display(numeric_df.describe())
 
     except Exception as e:
         raise RuntimeError(f'Error occurred while processing df.describe(). Deatils: {e}.')
@@ -224,7 +225,7 @@ def col_replace(df: pd.DataFrame, col: str, old_var: Any, new_var: Any) -> pd.Da
             print(f"Warning: No occurrences of {old_var} found in column '{col}'.")
 
         elif old_var not in new_df[col].values and not isinstance(old_var, list):
-            print(f"Warning: No occurrence of {old_var} found in column '{col}.'")
+            print(f"Warning: No occurrence of {old_var} found in column '{col}'.")
 
         return new_df
 
@@ -280,8 +281,7 @@ def null_rows(df: pd.DataFrame, *col: str) -> Union[pd.DataFrame, pd.Series]:
 
     except KeyError as e:
         missing_col = e.args[0]
-        raise KeyError(f"KeyError: Column(s) not found. Missing column: '{missing_col}'."
-                      f"Available columns: {list(df.columns)}.")
+        raise KeyError(f"KeyError: Column(s) not found. Missing column: '{missing_col}'. Available columns: {list(df.columns)}.")
 
     except Exception as e:
         raise RuntimeError(f'RuntimeError: An unexpected error occurred while processing mull values. Details: {e}.')
@@ -345,21 +345,16 @@ def df_loc(df: pd.DataFrame, condition: Union[pd.Series, List[bool], Any], col: 
     if missing_cols:
         raise KeyError(f'KeyError: The specified column(s) were not found in the DataFrame: {missing_cols}. Available columns: {list(df.columns)}.')
 
-    try:
-        if not isinstance(condition, (pd.Series, list, pd.np.ndarray)):
-            print(f"Warning: 'condition' type ({type(condition).__name__}) may lead to runtime errors. Expecting a pandas Series or array-like.")
-
-    except AttributeError:
-        pass
+    if not isinstance(condition, (pd.Series, list, np.ndarray)):
+        print(f"Warning: 'condition' type ({type(condition).__name__}) may lead to runtime errors. Expecting a pandas Series or array-like.")
 
     try:
         result = df.loc[condition, col]
         return result
 
-    except IndexError as e:
-        length = f"Condition length: {len(condition) if hasattr(condition, '__len__') else 'N/A'}, DataFrame length: {len(df)}."
-        raise IndexError(f'IndexError: The length of the boolean condition does not match the DataFrame length. {length} Details: {e}.')
-
+    except KeyError as e:
+        raise ValueError(f"ValueError: Invalid index/condition provided. Details: {e}.")
+    
     except ValueError as e:
         raise ValueError(f'ValueError: Invalid boolean condition provided. Check that the condition is an array of boolean values and is correctly aligned/dimensioned. Details: {e}.')
 
@@ -451,7 +446,7 @@ def df_aggfunc(df: pd.DataFrame, aggfunc: Union[str, List[str],
     except KeyError as e:
         raise KeyError(f"KeyError: The specified column(s) were not found in the DataFrame or were referenced incorreclty by aggfunc. Missing key: {e}.")
 
-    except AttributeError as e:
+    except (AttributeError, TypeError) as e:
         raise ValueError(f"ValueError: The aggregation function '{aggfunc}' is not available or compatible with the selected data type(s). Details: {e}.")
 
     except Exception as e:
@@ -470,8 +465,9 @@ def drop_labels(df: pd.DataFrame, labels: Union[str, List[str]] = None, axis: Un
     ----------
     df : pandas.DataFrame
         The DataFrame from which to drop labels.
-    labels : str or list of str, optional
+    labels : str or int or list of str or int, optional  # UPDATED DOCSTRING
         A single label or a list of labels (row or column names) to drop.
+        Labels must match the type of the DataFrame's index or columns (usually str or int).
         If None, the function returns a copy of the original DataFrame.
         Defaults to None.
     axis : {0, 1, 'index', 'columns'}, optional
@@ -487,7 +483,7 @@ def drop_labels(df: pd.DataFrame, labels: Union[str, List[str]] = None, axis: Un
     Raises
     ------
     TypeError
-        If `df` is not a pandas DataFrame, if `labels` is provided but not a string or list of strings,
+        If `df` is not a pandas DataFrame, if `labels` is provided but not a string or list of strings/integers,
         or if `axis` is not a valid type (int or str).
     ValueError
         If `axis` is provided but not one of the valid values (0, 1, 'index', 'columns').
@@ -507,8 +503,8 @@ def drop_labels(df: pd.DataFrame, labels: Union[str, List[str]] = None, axis: Un
         normalized_labels = [labels]
 
     elif isinstance(labels, list):
-        if not all(isinstance(label, str) for label in labels):
-            raise TypeError(f"TypeError: All elements in 'labels' list must be strings.")
+        if not all(isinstance(label, (str, int)) for label in labels):
+            raise TypeError(f"TypeError: All elements in 'labels' list must be strings or integers.")
 
         normalized_labels = labels
 
@@ -522,7 +518,7 @@ def drop_labels(df: pd.DataFrame, labels: Union[str, List[str]] = None, axis: Un
             raise TypeError(f"TypeError: 'axis' must be an integer (0 or 1) or a string ('index' or 'columns'), but received {type(axis).__name__}.")
 
         else:
-            raise ValueError(f"ValueError: 'axis' must be one of {valid_axis}, but received '{axis}'.")
+            raise ValueError(f"ValueError: 'axis' must be one of {{0, 1, 'index', 'columns'}}, but received '{axis}'.")
 
     try:
         return df.drop(labels=normalized_labels, axis=axis, errors='ignore')
@@ -968,7 +964,7 @@ def chi_squared_test(df: pd.DataFrame, col1: str, col2: str, alpha: float = 0.05
             - expected (pandas.DataFrame or None): The expected frequencies under the null hypothesis.
             - observed (pandas.DataFrame or None): The observed frequencies (contingency table).
             - stats (pandas.DataFrame or None): A table of test statistics, including
-              Chi-Square ($\chi^2$), p-value, Cramer's V, and statistical power.
+              Chi-Square, p-value, Cramer's V, and statistical power.
             Returns (None, None, None) if assumptions are not met.
 
     Raises
