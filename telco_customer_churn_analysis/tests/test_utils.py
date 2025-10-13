@@ -1,6 +1,8 @@
 import pytest
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from unittest import mock
 import os
 import random
@@ -36,6 +38,135 @@ def mock_excel_file(tmp_path):
     file_path = tmp_path / "test.xlsx"
     df.to_excel(file_path, index=False)
     return str(file_path)
+
+
+@pytest.fixture(autouse=True)
+def mock_plotting_calls(monkeypatch):
+    """Mocks `plt.show()` and `plt.subplots()` to prevent plot display and enable checks."""
+    monkeypatch.setattr(plt, 'show', lambda: None)
+    monkeypatch.setattr(plt, 'tight_layout', lambda: None)
+
+    mock_fig = mock.Mock()
+    mock_ax = mock.Mock()
+    mock_ax.set_xticklabels.return_value = None
+    mock_ax.get_xticklabels.return_value = []
+    mock_ax.set_yticklabels.return_value = None
+    mock_ax.get_yticklabels.return_value = []
+    mock_ax.get_figure.return_value = mock_fig
+
+    mock_ax.containers = [mock.Mock()]
+    mock_ax.bar_label.return_value = None
+
+    def mock_subplots(*args, **kwargs):
+        return (mock_fig, mock_ax)
+    
+    monkeypatch.setattr(plt, 'subplots', mock_subplots)
+
+    mock_countplot = mock.Mock()
+    monkeypatch.setattr(sns, 'countplot', mock_countplot)
+
+    mock_histplot = mock.Mock()
+    monkeypatch.setattr(sns, 'histplot', mock_histplot)
+
+    yield mock_ax, mock_countplot, mock_histplot
+
+
+@pytest.fixture(autouse=True)
+def mock_heatmap_setup(mock_plotting_calls, monkeypatch):
+    mock_fig = mock.Mock()
+    mock_ax = mock.Mock()
+
+    monkeypatch.setattr(plt, 'figure', mock.Mock())
+    monkeypatch.setattr(plt, 'title', mock.Mock())
+    monkeypatch.setattr(plt, 'yticks', mock.Mock())
+    monkeypatch.setattr(plt, 'xticks', mock.Mock())
+    monkeypatch.setattr(plt, 'tight_layout', lambda: None)
+    monkeypatch.setattr(plt, 'show', lambda: None)
+
+    mock_heatmap = mock.Mock()
+    monkeypatch.setattr(sns, 'heatmap', mock_heatmap)
+
+    mock_corr_matrix = pd.DataFrame({
+        'A': [1.0, 0.5],
+        'C': [0.5, 1.0]
+    }, index=['A', 'C'])
+
+    def mock_df_corr(numeric_only):
+        return mock_corr_matrix
+    
+    yield mock_heatmap, mock_df_corr
+
+
+@pytest.fixture
+def mock_count_plot_dependency(monkeypatch):
+    mock_count_plot = mock.Mock()
+    import src.telco_customer_churn_analysis.utils as path_count_plot
+
+    monkeypatch.setattr(path_count_plot, 'count_plot', mock_count_plot)
+
+    yield mock_count_plot
+
+
+@pytest.fixture
+def sample_df_chi2():
+    data = {
+        'A': [1, 2, 3, 4, 5] * 10,
+        'B': ['x', 'y'] * 25,
+        'C': ['P', 'Q', 'P', 'Q', 'R'] * 10,
+        'D': np.random.choice(['Yes', 'No'], size=50, p=[0.7, 0.3])
+    }
+
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
+def mock_chi2_independence(monkeypatch):
+    ## Scenario 1 (Significant Result - Moderate Association)
+    expected_sig = pd.DataFrame({'x': [5.0, 5.0], 'y': [5.0, 5.0]}, index=['P', 'Q'])
+    observed_sig = pd.DataFrame({'x': [0, 2], 'y': [2, 8]}, index=['P', 'Q'])
+    stats_sig = pd.DataFrame({
+        'test': ['pearson'],
+        'chisq': [12.8],
+        'dof': [1],
+        'pval': [0.0003],
+        'cramer': [0.30],
+        'power': [0.95]
+    })
+
+
+    ## Scenario 2 (Non-Significant Result)
+    expected_non_sig = pd.DataFrame({'x': [10, 10], 'y': [10, 10]}, index=['P', 'Q'])
+    observed_non_sig = expected_non_sig.copy()
+    stats_non_sig = stats_sig.copy()
+    stats_non_sig.loc[0, 'pval'] = 0.50
+    stats_non_sig.loc[0, 'cramer'] = 0.05
+    stats_non_sig.loc[0, 'power'] = 0.15
+
+
+    ## Scenario 3 (Assumption violated (expected < 5 cells > 20%))
+    expected_viol = pd.DataFrame({'x': [1, 1], 'y': [8, 1]}, index=['P', 'Q'])
+    observed_viol = expected_viol.copy()
+
+    def mock_chi2(data, x, y):
+        if x == 'B' and y == 'C':
+            return expected_sig, observed_sig, stats_sig
+        
+        elif x == 'B' and y == 'A':
+            return expected_non_sig, observed_non_sig, stats_non_sig
+        
+        elif x == 'B' and y == 'D':
+            return expected_viol, observed_viol, stats_sig
+        
+        else:
+            raise RuntimeError("Mock called with unexpected columns.")
+        
+    with mock.patch('pingouin.chi2_independence', side_effect=mock_chi2) as m:
+        yield m
+
+
+@pytest.fixture
+def capfd_out(capfd):
+    yield capfd
 
 ## safe_display tests
 
@@ -654,3 +785,620 @@ class TestDropLabels:
 
         with pytest.raises(ValueError, match=pattern):
             drop_labels(sample_df, labels='A', axis=2)
+
+
+## count_plot tests
+
+class TestCountPlot:
+    @staticmethod
+    def test_count_plot_x_axis(sample_df, mock_plotting_calls):
+        """Test standard vertical count plot with minimal required arguments."""
+        mock_ax, mock_countplot, _ = mock_plotting_calls
+        
+        count_plot(title='Title', label='Label', df=sample_df, col='B', axis='x')
+
+        mock_countplot.assert_called_once()
+        called_kwargs = mock_countplot.call_args[1]
+
+        assert called_kwargs['x'] == 'B'
+
+        mock_ax.set_title.assert_called_once_with('Title')
+        mock_ax.set_xlabel.assert_called_once_with('Label')
+
+
+    @staticmethod
+    def test_count_plot_y_axis(sample_df, mock_plotting_calls):
+        """Test horizontal count plot orientation."""
+        mock_ax, mock_countplot, _ = mock_plotting_calls
+
+        count_plot(title='Title', label='Label', df=sample_df, col='B', axis='y')
+
+        mock_countplot.assert_called_once()
+        called_kwargs = mock_countplot.call_args[1]
+
+        assert called_kwargs['y'] == 'B'
+
+        mock_ax.set_title.assert_called_once_with('Title')
+        mock_ax.set_ylabel.assert_called_once_with('Label')
+
+    
+    @staticmethod
+    def test_count_plot_with_hue_and_order(sample_df, mock_plotting_calls):
+        """Test count plot with 'hue' and 'order' parameters"""
+        mock_ax, mock_countplot, _ = mock_plotting_calls
+
+        df_copy = sample_df.dropna(subset=['A']).copy()
+        df_copy['A'] = df_copy['A'].astype('int').astype('str')
+        expected_order = ['x', 'y', 'z']
+
+        count_plot(title='Title', label='Label', df=df_copy, col='B', axis='x', hue='A', order=expected_order)
+
+        mock_countplot.assert_called_once()
+        called_kwargs = mock_countplot.call_args[1]
+
+        assert called_kwargs['hue'] == 'A'
+        assert called_kwargs['order'] == expected_order
+
+        mock_ax.set_title.assert_called_once_with('Title')
+        mock_ax.set_xlabel.assert_called_once_with('Label')
+
+
+    @staticmethod
+    def test_count_plot_tick_rotation(sample_df, mock_plotting_calls):
+        """Test count plot with a non-zero tick rotation."""
+        mock_ax, mock_countplot, _ = mock_plotting_calls
+
+        count_plot(title='Title', label='Label', df=sample_df, col='B', tick_rotation=45)
+
+        mock_ax.set_xticklabels.assert_called_once()
+
+    @staticmethod
+    def test_count_plot_type_error_df(sample_df):
+        """Test `count_plot()` raises TypeError when 'df' is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame"):
+            count_plot(title='Title', label='Label', df='not a df', col='B')
+
+
+    @staticmethod
+    def test_count_plot_key_error_col(sample_df):
+        """Test `count_plot()` raises a KeyError when 'col' is missing."""
+        with pytest.raises(KeyError, match="Column 'Missing' not found in DataFrame"):
+            count_plot(title='Title', label='Label', df=sample_df, col='Missing')
+
+
+    @staticmethod
+    def test_count_plot_key_error_hue(sample_df):
+        """Test `count_plot()` raises a KeyError when 'hue' is missing."""
+        with pytest.raises(KeyError, match="Hue column 'Missing' not found in DataFrame"):
+            count_plot(title='Title', label='Label', df=sample_df, col='B', hue='Missing')
+
+
+    @staticmethod
+    def test_count_plot_value_error_axis(sample_df):
+        """Test `count_plot()` raises a ValueError when 'axis' is invalid."""
+        with pytest.raises(ValueError, match="'axis' must be 'x' or 'y'"):
+            count_plot(title='Title', label='Label', df=sample_df, col='B', axis='Z')
+
+
+    @staticmethod
+    def test_count_plot_value_error_tick_rotation(sample_df):
+        """Test `count_plot()` raises a ValueError when 'tick_rotation' is invalid."""
+        with pytest.raises(ValueError, match="'tick_rotation' must be a number"):
+            count_plot(title='Title', label='Label', df=sample_df, col='B', tick_rotation='45')
+
+    
+    @staticmethod
+    def test_count_plot_type_error_non_string_args(sample_df):
+        """Test `count_plot()` raises a TypeError when 'title' is not a string."""
+        with pytest.raises(TypeError, match="'title', 'label', and 'col' must all be strings"):
+            count_plot(title=123, label='Label', df=sample_df, col='B')
+
+
+## histogram tests
+
+class TestHistogram:
+    @staticmethod
+    def test_histogram_x_axis(sample_df, mock_plotting_calls):
+        """Test standard vertical histogram with default settings."""
+        mock_ax, _ , mock_histplot = mock_plotting_calls
+
+        histogram(title='Title', label='Label', df=sample_df, col='A', bins=10, axis='x')
+
+        mock_ax.set_title.assert_called_once_with('Title')
+        mock_ax.set_xlabel.assert_called_once_with('Label')
+
+        mock_histplot.assert_called_once()
+        called_kwargs = mock_histplot.call_args[1]
+
+        assert called_kwargs['x'] == 'A'
+        assert called_kwargs['bins'] == 10
+        assert called_kwargs['kde'] is False
+        assert called_kwargs['hue'] is None
+        assert called_kwargs['data'] is sample_df
+
+
+    @staticmethod
+    def test_histogram_y_axis_with_kde(sample_df, mock_plotting_calls):
+        """Test horizontal histogram with 'kde' and label swapping."""
+        mock_ax, _ , mock_histplot = mock_plotting_calls
+
+        histogram(title='Title', label='Label', df=sample_df, col='A', bins=10, axis='y', kde=True)
+
+        mock_ax.set_title.assert_called_once_with('Title')
+        mock_ax.set_ylabel.assert_called_once_with('Label')
+
+        mock_histplot.assert_called_once()
+        called_kwargs = mock_histplot.call_args[1]
+
+        assert called_kwargs['y'] == 'A'
+        assert called_kwargs['bins'] == 10
+        assert called_kwargs['kde'] is True
+        assert called_kwargs['hue'] is None
+        assert called_kwargs['data'] is sample_df
+
+
+    @staticmethod
+    def test_histogram_with_hue_and_bin_list(sample_df, mock_plotting_calls):
+        """Test histogram with a categorical 'hue' and a custom list of bins."""
+        mock_ax, _ , mock_histplot = mock_plotting_calls
+
+        custom_bins = [0, 1, 2, 3, 4, 5]
+
+        histogram(title='Title', label='Label', df=sample_df, col='A', bins=custom_bins, hue='B')
+
+        mock_ax.set_title.assert_called_once_with('Title')
+        mock_ax.set_xlabel.assert_called_once_with('Label')
+
+        mock_histplot.assert_called_once()
+        called_kwargs = mock_histplot.call_args[1]
+
+        assert called_kwargs['x'] == 'A'
+        assert called_kwargs['bins'] == custom_bins
+        assert called_kwargs['hue'] == 'B'
+        assert called_kwargs['data'] is sample_df
+
+
+    @staticmethod
+    def test_histogram_type_error_df(sample_df):
+        """Test `histogram()` raises a TypeError when 'df' is not a DataFrame."""
+        with pytest.raises(TypeError, match="Input 'df' must be a pandas DataFrame"):
+            histogram(title='Title', label='Label', df='not a df', col='A', bins=10)
+
+    
+    @staticmethod
+    def test_histogram_key_error_col(sample_df):
+        """Test `histogram()` raises a KeyError when 'col' is missing."""
+        with pytest.raises(KeyError, match="Column 'Missing' not found in DataFrame"):
+            histogram(title='Title', label='Label', df=sample_df, col='Missing', bins=10)
+
+
+    @staticmethod
+    def test_histogram_key_error_hue(sample_df):
+        """Test `histogram()` raises a KeyError when 'hue' is missing."""
+        with pytest.raises(KeyError, match="Hue column 'Missing' not found in DataFrame"):
+            histogram(title='Title', label='Label', df=sample_df, col='A', bins=10, hue='Missing')
+
+    
+    @staticmethod
+    def test_histogram_value_error_axis(sample_df):
+        """Test `histogram()` raises a ValueError when 'axis' is invalid."""
+        with pytest.raises(ValueError, match="'axis' must be 'x' or 'y'"):
+            histogram(title='Title', label='Label', df=sample_df, col='A', bins=10, axis='z')
+
+    
+    @staticmethod
+    def test_histogram_runtime_error_non_numeric(sample_df, mock_plotting_calls):
+        """Test `histogram()` raises a RuntimeError when the column is non-numerical."""
+        mock_ax, _ , mock_histplot = mock_plotting_calls
+
+        mock_histplot.side_effect = ValueError("Could not convert column to numeric type")
+
+        with pytest.raises(RuntimeError, match="Check if column 'col' is numerical"):
+            histogram(title='Title', label='Label', df=sample_df, col='B', bins=10)
+
+
+## heatmap test
+
+class TestHeatmap:
+    @staticmethod
+    def test_heatmap_basic_functionality(sample_df, mock_heatmap_setup, monkeypatch):
+        """Test basic heatmap call with default parameters."""
+        mock_heatmap, mock_df_corr = mock_heatmap_setup
+
+        monkeypatch.setattr(sample_df, 'corr', mock_df_corr)
+
+        heatmap(title='Title', df=sample_df)
+
+        mock_heatmap.assert_called_once()
+        called_args, called_kwargs = mock_heatmap.call_args
+
+        assert called_args[0].shape == (2, 2)
+
+        assert called_kwargs['annot'] is True
+        assert called_kwargs['cmap'] == 'coolwarm'
+        assert called_kwargs['fmt'] == '.2f'
+        assert called_kwargs['annot_kws']['fontsize'] == 7
+
+        plt.title.assert_called_once_with('Title')
+        plt.yticks.assert_called_once_with(rotation=0)
+        plt.xticks.assert_called_once_with(rotation=90)
+
+
+    @staticmethod
+    def test_heatmap_custom_params(sample_df, mock_heatmap_setup, monkeypatch):
+        """Test heatmap with custom 'annot', 'cmap', 'fontsize', and 'num_decimals'."""
+        mock_heatmap, mock_df_corr = mock_heatmap_setup
+
+        monkeypatch.setattr(sample_df, 'corr', mock_df_corr)
+
+        heatmap(title='Title', df=sample_df, annot=False, cmap='viridis', fontsize=10, num_decimals=4)
+
+        mock_heatmap.assert_called_once()
+        called_kwargs = mock_heatmap.call_args[1]
+
+        assert called_kwargs['annot'] is False
+        assert called_kwargs['cmap'] == 'viridis'
+        assert called_kwargs['fmt'] == '.4f'
+        assert called_kwargs['annot_kws']['fontsize'] == 10
+        plt.title.assert_called_once_with('Title')
+
+
+    @staticmethod
+    def test_heatmap_value_error_no_numeric_columns():
+        """Test `heatmap()` raises ValueError when the DataFrame contains no numeric columns."""
+        non_numeric_df = pd.DataFrame({
+            'A': ['a', 'b'],
+            'B': ['c', 'd']
+        })
+
+        with pytest.raises(ValueError, match="DataFrame contains no numeric columns"):
+            heatmap(title='Title', df=non_numeric_df)
+
+
+    @staticmethod
+    def test_heatmap_type_error_title(sample_df):
+        """Test `heatmap()`` raises TypeError when title is non-string."""
+        with pytest.raises(TypeError, match="'title' must be a string"):
+            heatmap(title=123, df=sample_df)
+
+
+    @staticmethod
+    def test_heatmap_value_error_negative_decimals(sample_df):
+        """Test `heatmap()`` raises ValueError when 'num_decimals' is negative."""
+        with pytest.raises(ValueError, match="'num_decimals' must be a non-negative integer"):
+            heatmap(title='Title', df=sample_df, num_decimals=-1)
+
+
+    @staticmethod
+    def test_heatmap_value_error_non_positive_fontsize(sample_df):
+        """Test `heatmap()`` raises ValueError when 'fontsize' is non-positive."""
+        with pytest.raises(ValueError, match="'fontsize' must be a positive number"):
+            heatmap(title='Title', df=sample_df, fontsize=0)
+
+
+## bin_and_plot tests
+
+class TestBinAndPlot:
+    @staticmethod
+    def test_bin_and_plot_returns_correct_data(sample_df):
+        """Test if the new binned column is created correctly and returned."""
+        bins = [0, 2.5, 5.0]
+
+        df_result = bin_and_plot(title='Title', label='Label', df=sample_df, col='A', new_col='new_A', bins=bins, show_plot=False)
+
+        assert 'new_A' in df_result.columns
+        assert isinstance(df_result['new_A'].dtype, pd.CategoricalDtype)
+
+        counts = df_result['new_A'].value_counts()
+        assert len(counts) == 2
+        assert sorted(counts.to_list()) == [2, 2]
+        assert df_result.shape[0] == sample_df.shape[0]
+        assert isinstance(counts.index[0], pd.Interval)
+
+
+    @staticmethod
+    def test_bin_and_plot_custom_labels_and_order(sample_df):
+        """Test correct binning with custom labels, verifying the internal 'plot_order' logic."""
+        bins = [0, 2, 4, 6]
+        labels = ['Low', 'Medium', 'High']
+
+        df_result = bin_and_plot(title='Title', label='Label', df=sample_df, col='A', new_col='new_A', bins=bins,
+                                 labels=labels, show_plot=False)
+        
+        assert df_result['new_A'].cat.categories.tolist() == labels
+
+        counts = df_result['new_A'].value_counts().drop(labels=['nan'], errors='ignore')
+        assert counts.to_dict() == {'Low': 2, 'Medium': 1, 'High': 1}
+
+
+    @staticmethod
+    def test_bin_and_plot_calls_count_plot_with_correct_map(sample_df, mock_count_plot_dependency):
+        """Test that `count_plot()` is called with correct arguments, including the binned column and 'plot_order'."""
+        mock_count_plot = mock_count_plot_dependency
+        bins = 3
+
+        bin_and_plot(title='Title', label='Label', df=sample_df, col='A', new_col='new_A', bins=bins, hue='B',
+                     axis='y', palette='Set1', tick_rotation=45, show_plot=True)
+        
+        mock_count_plot.assert_called_once()
+        called_kwargs = mock_count_plot.call_args[1]
+
+        assert called_kwargs['title'] == 'Title'
+        assert called_kwargs['label'] == 'Label'
+        assert called_kwargs['col'] == 'new_A'
+        assert called_kwargs['axis'] == 'y'
+        assert called_kwargs['hue'] == 'B'
+        assert called_kwargs['palette'] == 'Set1'
+        assert called_kwargs['tick_rotation'] == 45
+        assert isinstance(called_kwargs['order'], list)
+        assert len(called_kwargs['order']) == bins
+
+
+    @staticmethod
+    def test_bin_and_plot_calls_count_plot_with_labels_order(sample_df, mock_count_plot_dependency):
+        """Test that custom labels are passed as 'order' to `count_plot()"""
+        mock_count_plot = mock_count_plot_dependency
+        labels = ['L', 'M', 'H']
+
+        bin_and_plot(title='Title', label='Labels', df=sample_df, col='A', new_col='new_A', bins=3, labels=labels, show_plot=True)
+
+        mock_count_plot.assert_called_once()
+        called_kwargs = mock_count_plot.call_args[1]
+
+        assert called_kwargs['order'] == labels
+
+
+    @staticmethod
+    def test_bin_and_plot_skips_plotting(sample_df, mock_count_plot_dependency):
+        """Test that `count_plot()` is NOT called when 'show_plot' is False."""
+        mock_count_plot = mock_count_plot_dependency
+
+        df_result = bin_and_plot(title='Title', label='Labels', df=sample_df, col='A', new_col='new_A', bins=5, show_plot=False)
+
+        mock_count_plot.assert_not_called()
+        assert 'new_A' in df_result.columns
+
+
+    @staticmethod
+    def test_bin_and_plot_value_error_non_numeric_cols(sample_df):
+        """Test `bin_and_plot()` raises a RuntimeError when the source column 'col'is non-numeric."""
+        with pytest.raises(RuntimeError, match="An unexpected error occurred during binning of column B"):
+            bin_and_plot(title='Title', label='Labels', df=sample_df, col='B', new_col='new_B', bins=10)
+
+
+    @staticmethod
+    def test_bin_and_plot_key_error_col(sample_df):
+        """Test `bin_and_plot()` raises a KeyError when 'col'is missing."""
+        with pytest.raises(KeyError, match="Column 'Missing' not found in DataFrame"):
+            bin_and_plot(title='Title', label='Labels', df=sample_df, col='Missing', new_col='new', bins=10)
+
+    
+    @staticmethod
+    def test_bin_and_plot_type_error_new_col(sample_df):
+        """Test `bin_and_plot()` raises a TypeError when 'new_col' is non-string."""
+        with pytest.raises(TypeError, match="'title', 'label', 'col', and 'new_col' must be strings"):
+            bin_and_plot(title='Title', label='Labels', df=sample_df, col='A', new_col=123, bins=10)
+
+
+## chi_squared_test test
+
+class TestChiSquaredTest:
+    @staticmethod
+    def test_chi_squared_test_significant_result(sample_df_chi2, mock_chi2_independence, capfd_out):
+        """Test case where H0 is rejected (p <= alpha) with strong association."""
+        expected, observed, stats = chi_squared_test(df=sample_df_chi2, col1='B', col2='C', alpha=0.05)
+
+        assert expected is not None
+        assert observed is not None
+        assert stats is not None
+        assert isinstance(stats, pd.DataFrame)
+
+        out, _ = capfd_out.readouterr()
+
+        assert "Reject Null Hypothesis (H0)" in out
+        assert "statistically significant association" in out
+        assert "Moderate Association" in out
+
+        assert "------Expected Frequencies------" in out
+        assert "------Observed Frequencies------" in out
+        assert "------Test Statistics Summary------" in out
+
+
+    @staticmethod
+    def test_chi_squared_test_non_significant_result(sample_df_chi2, mock_chi2_independence, capfd_out):
+        """Test case where H0 is failed to be rejected (p > alpha)"""
+        expected, observed, _ = chi_squared_test(df=sample_df_chi2, col1='B', col2='A', alpha=0.01)
+
+        assert expected is not None
+        assert observed is not None
+
+        out, _ = capfd_out.readouterr()
+
+        assert "Fail to Reject the Null Hypothesis (H0)" in out
+        assert "no statistically significance evidence of an association" in out
+        assert "p-value is 0.5000" in out
+
+
+    @staticmethod
+    def test_chi_squared_test_custom_alpha(sample_df_chi2, mock_chi2_independence, capfd_out):
+        """Test using a different alpha to veriy it's used in the conclusion."""
+        chi_squared_test(df=sample_df_chi2, col1='B', col2='C', alpha=0.01)
+
+        out, _ = capfd_out.readouterr()
+
+        assert "alpha = 0.01" in out
+        assert "Reject Null Hypothesis (H0)" in out
+
+
+    @staticmethod
+    def test_chi_squared_test_assumption_violation(sample_df_chi2, mock_chi2_independence, capfd_out):
+        """Test case where the expected cell frequency assumption is violated."""
+        expected_viol_data = pd.DataFrame({'x': [1, 1], 'y': [8, 1]}, index=['P', 'Q'])
+        stats_sig_data = pd.DataFrame({ 'test': ['pearson'], 'chisq': [12.8], 'dof': [1], 'pval': [0.0003], 'cramer': [0.35], 'power': [0.95]})
+        
+        def mock_pingouin_violation(data, x, y):
+            return expected_viol_data, expected_viol_data, stats_sig_data
+        
+        with mock.patch('pingouin.chi2_independence', side_effect=mock_pingouin_violation):
+            expected, observed, stats = chi_squared_test(df=sample_df_chi2, col1='B', col2='D', alpha=0.05)
+        
+        assert expected is None
+        assert observed is None
+        assert stats is None
+
+        out, _ = capfd_out.readouterr()
+
+        assert "Assumption Not Met: 75.0%" in out
+        assert "Test aborted." in out
+
+
+    @staticmethod
+    def test_chi_squared_test_strongest_association(sample_df_chi2, monkeypatch, capfd_out):
+        """Test the 'very Strong Association' logic (Cramer's V > 0.50)."""
+        expected_strong = pd.DataFrame({'x': [5.0, 5.0], 'y': [5.0, 5.0]}, index=['P', 'Q'])
+        stats_strong = pd.DataFrame({'test': ['pearson'], 'chisq': [20.0], 'dof': [1], 'pval': [0.00001], 'cramer': [0.85], 'power': [1.0]})
+        
+        def mock_pingouin_strong(data, x, y):            
+            return expected_strong, expected_strong, stats_strong
+        
+        monkeypatch.setattr('pingouin.chi2_independence', mock_pingouin_strong)
+
+        chi_squared_test(df=sample_df_chi2, col1='B', col2='A', alpha=0.05)
+
+        out, _ = capfd_out.readouterr()
+
+        assert "Cramer's V effect size is 0.8500" in out
+        assert "Very Strong Association" in out
+
+
+    @staticmethod
+    def test_chi_squared_test_type_error_col1(sample_df_chi2):
+        """Test `chi_squared_test()` raises TypeError when 'col1' is non-string."""
+        with pytest.raises(TypeError, match="'col1' and 'col2' must be strings"):
+            chi_squared_test(df=sample_df_chi2, col1=123, col2='B', alpha=0.05)
+
+
+    @staticmethod
+    def test_chi_squared_test_type_error_col2(sample_df_chi2):
+        """Test `chi_squared_test()` raises TypeError when 'col2' is non-string."""
+        with pytest.raises(TypeError, match="'col1' and 'col2' must be strings"):
+            chi_squared_test(df=sample_df_chi2, col1='B', col2=123, alpha=0.05)
+
+
+    @staticmethod
+    def test_chi_squared_test_value_error_alpha(sample_df_chi2):
+        """Test `chi_squared_test()` raises ValueError when 'alpha' is outside the (0, 1) range."""
+        with pytest.raises(ValueError, match="'alpha' must be a float between 0 and 1"):
+            chi_squared_test(df=sample_df_chi2, col1='B', col2='C', alpha=1.0)
+
+
+## generate_data tests
+
+@pytest.fixture(scope='class')
+def sample_data():
+    return generate_data(n_records=10, seed=42)
+
+class TestGenerateData:
+    @staticmethod
+    def test_generate_data_output_type_and_shape(sample_data):
+        """Test that the output is a DataFrame, has the correct number of columns, and the requested number of rows."""
+        expected_cols = 32
+        expected_rows = 10
+
+        assert isinstance(sample_data, pd.DataFrame)
+        assert sample_data.shape == (expected_rows, expected_cols)
+
+
+    @staticmethod
+    def test_generate_data_columns_names_and_order(sample_data):
+        """Test that all required columns are present in the correct order."""
+        expected_order = [
+        'CustomerID', 'Count', 'Country', 'State', 'City', 'Zip Code', 'Lat Long',
+        'Latitude', 'Longitude', 'Gender', 'Senior Citizen', 'Partner',
+        'Dependents', 'Tenure Months', 'Phone Service', 'Multiple Lines',
+        'Internet Service', 'Online Security', 'Online Backup', 'Device Protection',
+        'Tech Support', 'Streaming TV', 'Streaming Movies', 'Contract',
+        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges',
+        'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason'
+        ]
+
+        assert len(sample_data.columns) == len(expected_order)
+        assert list(sample_data.columns) == expected_order
+
+
+    @staticmethod
+    def test_generate_data_reproducibility():
+        """Test that two DataFrames generated with the same seed are identical."""
+        df1 = generate_data(n_records=50, seed=100)
+        df2 = generate_data(n_records=50, seed=100)
+
+        pd.testing.assert_frame_equal(df1, df2)
+
+
+    @staticmethod
+    def test_generate_data_id_uniqueness_and_format(sample_data):
+        """Test CustomerID uniqueness and format."""
+        assert sample_data['CustomerID'].nunique() == sample_data.shape[0]
+        assert sample_data['CustomerID'].iloc[0] == '0001-CUSTM'
+        assert sample_data['CustomerID'].iloc[-1] == '0010-CUSTM'
+
+
+    @staticmethod
+    def test_generate_data_churn_value_range(sample_data):
+        """Test that 'Churn Value' is stricly binary (0 or 1)."""
+        assert set(sample_data['Churn Value'].unique()).issubset({0, 1})
+
+
+    @staticmethod
+    def test_generate_data_charges_non_negative(sample_data):
+        """Test that all financial columns are non-negative."""
+        assert (sample_data['Monthly Charges'] >= 0).all()
+        assert (sample_data['Total Charges'] >= 0).all()
+        assert (sample_data['CLTV'] >= 0).all()
+
+
+    @staticmethod
+    def test_generate_data_tenure_range(sample_data):
+        """Test that 'Tenure Months' is within the expected 1-72 month range."""
+        assert sample_data['Tenure Months'].min() >= 1
+        assert sample_data['Tenure Months'].max() <= 72
+
+
+    @staticmethod
+    def test_generate_data_multiple_lines_dependency(sample_data):
+        """
+        Test that if 'Phone Service' is 'No', then 'Multiple Lines' must be 'No phone service'.
+        Dependency: 'Multiple Lines' requires 'Phone Service'.
+        """
+        no_phone_service = sample_data[sample_data['Phone Service'] == 'No']
+
+        assert (no_phone_service['Multiple Lines'] == 'No phone service').all()
+
+
+    @staticmethod
+    def test_generate_data_internet_service_addons_dependency(sample_data):
+        """Test that if 'Internet Service' is 'No', then all internet-dependents add-ons must be 'No internet Service'."""
+        no_internet_service = sample_data[sample_data['Internet Service'] == 'No']
+        internet_dependent_cols = ['Online Security', 'Online Backup', 'Device Protection',
+                               'Tech Support', 'Streaming TV', 'Streaming Movies']
+        
+
+        for col in internet_dependent_cols:
+            assert (no_internet_service[col] == 'No internet service').all()
+
+
+    @staticmethod
+    def test_generate_data_total_charges_logic(sample_data):
+        """Test the crucial logic that for customers with 1 month tenure, 'Total Charges' must be equal to 'Monthly Charges'."""
+        new_customers = sample_data[sample_data['Tenure Months'] <= 1]
+
+        if not new_customers.empty:
+            np.testing.assert_allclose(new_customers['Total Charges'], new_customers['Monthly Charges'], atol=0.01)
+
+
+    @staticmethod
+    def test_generate_data_churn_reason_dependency(sample_data):
+        """Test that 'Churn Reason' is only present (not empty string) for Churned Customers."""
+        non_churned = sample_data[sample_data['Churn Value'] == 0]
+
+        assert (non_churned['Churn Reason'] == '').all()

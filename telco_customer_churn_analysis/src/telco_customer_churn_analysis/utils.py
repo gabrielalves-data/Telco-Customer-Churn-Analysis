@@ -110,10 +110,9 @@ def read_excel(path: str, date_cols: Optional[List[str]] = None) -> pd.DataFrame
 def df_head(df: pd.DataFrame, n_rows: int = 5) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Analyzes and displays a summary of a pandas DataFrame's structure and contents.
-
-    This function provides a quick overview by displaying the first N rows,
-    the column data types and non-null counts, and descriptive statistics
-    for purely numerical columns (excluding datetime types).
+    This function provides a quick overview by displaying the first N rows,
+    the column data types and non-null counts, and descriptive statistics
+    for purely numerical columns (excluding datetime types).
 
     Parameters
     ----------
@@ -605,7 +604,16 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
     try:
         fig, ax = plt.subplots(figsize=(10,6))
 
-        plot_kwargs = {'data': df, 'hue': hue, 'order': order, 'palette': palette, axis: col}
+        plot_df = df.copy()
+        plot_df[col] = plot_df[col].astype(str)
+
+        plot_kwargs = {'data': plot_df, 'hue': hue, 'order': order, 'palette': palette}
+
+        if axis == 'x':
+            plot_kwargs['x'] = col
+
+        else:
+            plot_kwargs['y'] = col
 
         sns.countplot(ax=ax, **plot_kwargs)
 
@@ -703,14 +711,20 @@ def histogram(title: str, label: str, df: pd.DataFrame, col: str,
     try:
         fig, ax = plt.subplots(figsize=(10,6))
 
-        plot_kwargs = {'data': df, 'bins': bins, 'hue': hue, 'kde': kde, axis: col}
+        plot_kwargs = {'data': df, 'bins': bins, 'hue': hue, 'kde': kde}
 
+        if axis == 'x':
+            plot_kwargs['x'] = col
+
+        else:
+            plot_kwargs['y'] = col
+        
         sns.histplot(ax=ax, **plot_kwargs)
 
         if axis == 'x':
-            plt.xlabel(label)
+            ax.set_xlabel(label)
         else:
-            plt.ylabel(label)
+            ax.set_ylabel(label)
 
         ax.set_title(title)
 
@@ -905,7 +919,7 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
         if labels is not None:
           plot_order = labels
 
-        elif pd.api.types.is_categorical_dtype(df_new[new_col]):
+        elif isinstance(df_new[new_col].dtype, pd.CategoricalDtype):
           plot_order = df_new[new_col].cat.categories.tolist()
 
         else:
@@ -1092,7 +1106,7 @@ def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
 
     data: Dict[str, Union[np.ndarray, List[str]]] = {}
 
-    data['CustomerID'] = [f'CUST-{i:05d}' for i in range(1, N_RECORDS + 1)]
+    data['CustomerID'] = [f'{i:04d}-CUSTM' for i in range(1, N_RECORDS + 1)]
     data['Count'] = 1
     data['Country'] = 'United States'
     data['State'] = 'California'
