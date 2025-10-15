@@ -14,10 +14,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from typing import Union, Dict, List, Any, Optional, Tuple
 import joblib
 
-from utils import safe_display
-
-
-
+from src.telco_customer_churn_analysis.utils import (safe_display)
 
 def preprocess_data(df: pd.DataFrame, target: str,
                     cols_to_drop: Optional[Union[str, List[str]]] = None, test_size: float = 0.2,
@@ -97,11 +94,11 @@ def preprocess_data(df: pd.DataFrame, target: str,
         columns_to_drop = [target] + cols_to_drop
 
     else:
-        raise TypeError(f"TypeError: 'cols_to_drop'must be a string, a list of strings, or None.")
+        raise TypeError(f"TypeError: 'cols_to_drop' must be a string, a list of strings, or None.")
 
     for col in columns_to_drop:
         if col != target and col not in df.columns:
-            raise KeyError(f"KeyError: Column to droop '{col}' not found in DataFrame. Available columns {list(df.columns)}.")
+            raise KeyError(f"KeyError: Column to drop '{col}' not found in DataFrame. Available columns {list(df.columns)}.")
 
     try:
         X = df.drop(columns_to_drop, axis=1)
@@ -179,7 +176,7 @@ def model_pipelines(preprocessor: ColumnTransformer, comparative_models: Dict[st
         raise ValueError(f"ValueError: 'comparative_models' dictionary cannot be empty.")
 
     if not isinstance(random_state, int):
-        raise TypeError(f"TypeError: 'random_state' must be an interger.")
+        raise TypeError(f"TypeError: 'random_state' must be an integer.")
 
     models: Dict[str, Pipeline] = {}
 
@@ -190,6 +187,8 @@ def model_pipelines(preprocessor: ColumnTransformer, comparative_models: Dict[st
         ])
 
         for name, model in comparative_models.items():
+            if not isinstance(model, BaseEstimator):
+                raise TypeError(f"Invalid model type for '{name}'. Expected an sklearn estimator but got {type(model).__name__}.")
             if hasattr(model, 'random_state'):
                 model.set_params(random_state=random_state)
 
@@ -362,7 +361,7 @@ def train_evaluate_model(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: p
         raise ValueError(f"The 'params' dictionary must be a non-empty dictionary.")
 
     if not isinstance(cv, int) or cv <= 1:
-        raise ValueError(f"ValueError: 'cv' msut be an integer greater than 1.")
+        raise ValueError(f"ValueError: 'cv' must be an integer greater than 1.")
 
     best_models: Dict[str, Pipeline] = {}
     model_results: List[Dict[str, Any]] = []
@@ -371,6 +370,7 @@ def train_evaluate_model(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: p
         try:
             if not isinstance(setup, dict) or 'model' not in setup or 'params' not in setup:
                 print(f"Warning: Skipping '{name}'. Setup is invalid or missing 'model' or 'params' keys.")
+                continue
 
             grid_search = GridSearchCV(
                 estimator=setup['model'],
@@ -428,9 +428,9 @@ def train_evaluate_model(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: p
             print(f'F1-Score: {_f1_score:.4f}')
 
             if _roc_auc_score != 'N/A':
-                print(f'ROC-AUC-SCORE: {_roc_auc_score:.4f}')
+                print(f'Roc-Auc-Score: {_roc_auc_score:.4f}')
             else:
-                print('ROC-AUC-SCORE: N/A')
+                print('Roc-Auc-Score: N/A')
 
             print(f'Feature Importance: {top_features}\n')
 
