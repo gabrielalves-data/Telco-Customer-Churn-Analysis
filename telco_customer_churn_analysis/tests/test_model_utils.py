@@ -10,11 +10,17 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.exceptions import NotFittedError
+import os
 
-from src.telco_customer_churn_analysis.model_utils import (preprocess_data, model_pipelines, hyperparameters, train_evaluate_model)
+from src.telco_customer_churn_analysis.model_utils import (preprocess_data, model_pipelines, hyperparameters, train_evaluate_model,
+                                                           voting_model, comparative_models, profit_curve, deployment_model,
+                                                           predict_churn, abc_test
+                                                           )
 
 @pytest.fixture
 def sample_dataframe():
+    """Fixture providing a synthetic customer DataFrame with mixed data types for testing."""
     data = {
         'target_col': np.random.rand(20),
         'low_cat_str': ['A'] * 10 + ['B'] * 10,
@@ -35,6 +41,7 @@ def sample_dataframe():
 
 @pytest.fixture
 def mock_preprocessor():
+    """Fixture returning a mocked `ColumnTransformer` for pipeline tests."""
     mock_preprocessor = mock.create_autospec(ColumnTransformer, isinstance=True)
 
     return mock_preprocessor
@@ -42,6 +49,7 @@ def mock_preprocessor():
 
 @pytest.fixture
 def mock_comparative_models(random_state):
+    """Fixture returning mock classifiers (one with and one without `random_state`) for model evaluation tests."""
     class MockRandomModel(BaseEstimator, ClassifierMixin):
         def __init__(self, random_state=None):
             self.random_state = random_state
@@ -69,10 +77,26 @@ def mock_comparative_models(random_state):
 
 @pytest.fixture
 def random_state():
+    """Fixture providing a fixed random state for reproducibility in tests."""
     return 42
 
 
 def create_mock_pipeline(classifier_instance, is_valid_pipeline=True):
+    """
+    Creates a mocked sklearn Pipeline with a classifier and optimal validation flag.
+    
+    Parameters
+    ----------
+    classifier_instance: sklearn classifier
+        The classifier to include in the mock pipeline.
+    is_valid_pipeline: bool
+        If True, sets the mock class as Pipeline to mimic real pipeline.
+        
+    Returns
+    -------
+    mock_pipeline: MagicMock
+        A mocked Pipeline with a 'classifier' and 'preprocessor' step."""
+    
     mock_pipeline = mock.MagicMock(spec=Pipeline)
 
     if is_valid_pipeline:
@@ -84,22 +108,27 @@ def create_mock_pipeline(classifier_instance, is_valid_pipeline=True):
 
 @pytest.fixture
 def logreg_classifier():
+    """Fixture providing a LogisticRegression instance."""
     return LogisticRegression()
 
 @pytest.fixture
 def knn_classifier():
+    """Fixture providing a KNeighborsClassifier instance."""
     return KNeighborsClassifier()
 
 @pytest.fixture
 def rf_Classifier():
+    """Fixture providing a RandomForestClassifier instance."""
     return RandomForestClassifier()
 
 @pytest.fixture
 def gnb_classifier():
+    """Fixture providing a GaussianNB instance."""
     return GaussianNB()
 
 @pytest.fixture
 def unsupported_classifier():
+    """Fixture providing a custom classifier that simulates an unsupported model type."""
     class UnsupportedClassifier(BaseEstimator):
         def fit(self, X, y=None): return self
     
@@ -107,7 +136,7 @@ def unsupported_classifier():
 
 @pytest.fixture
 def standard_models_dict(logreg_classifier, knn_classifier, rf_Classifier, gnb_classifier, unsupported_classifier):
-    
+    """Fixture returning a dictionary of standard model pipelines (some mock, some unsupported)."""
     return {
         'LogisticRegression': create_mock_pipeline(logreg_classifier),
         'KNN': create_mock_pipeline(knn_classifier),
@@ -119,6 +148,7 @@ def standard_models_dict(logreg_classifier, knn_classifier, rf_Classifier, gnb_c
 
 @pytest.fixture(scope='session')
 def mock_data():
+    """Fixture providing synthetic training and test datasets with mixed features."""
     np.random.seed(123)
     n_samples = 100
 
@@ -140,6 +170,7 @@ def mock_data():
 
 @pytest.fixture
 def basic_preprocessor():
+    """Fixture providing a basic ColumnTransformer with numeric and categorical pipelines."""
     numerical_features = ['num_a', 'num_b']
     categorical_features = ['cat_c']
 
@@ -156,6 +187,7 @@ def basic_preprocessor():
 
 @pytest.fixture
 def mock_params_logreg(basic_preprocessor):
+    """Fixture returning pipeline and param grid for LogisticRegression."""
     return {
         'LogisticRegression': {
             'model': Pipeline(steps=[
@@ -171,6 +203,7 @@ def mock_params_logreg(basic_preprocessor):
 
 @pytest.fixture
 def mock_params_rf(basic_preprocessor):
+    """Fixture returning pipeline and param grid for RandomForestClassifier."""
     return {
         'RandomForest': {
             'model': Pipeline(steps=[
@@ -187,12 +220,14 @@ def mock_params_rf(basic_preprocessor):
 
 @pytest.fixture
 def mock_params_all(mock_params_logreg, mock_params_rf):
+    """Fixture merging param grids for multiple classifiers."""
     return {**mock_params_logreg, **mock_params_rf}
 
 
 @pytest.fixture
 def mock_params_non_proba(basic_preprocessor):
-    class NonProbaClassifier:
+    """Fixture returning a pipeline with a classifier that does not support `predict_proba()`."""
+    class NonProbaClassifier(BaseEstimator, ClassifierMixin):
         def fit(self, X, y):
             self.feature_importances_ = np.array([0.5, 0.3, 0.1, 0.1])
             self.classes_ = np.unique(y)
@@ -203,13 +238,29 @@ def mock_params_non_proba(basic_preprocessor):
         def get_params(self, deep=True): return {}
         def set_params(self, **params): return self
 
-    class NonProbaPipeline(Pipeline):
+    class NonProbaPipeline(Pipeline, BaseEstimator):
         def predict_proba(self, X):
             raise AttributeError("This model cannot compute probabilities.")
         
         def __init__(self, steps):
             super().__init__(steps)
 
+    pipeline = NonProbaPipeline(steps=[
+        ('preprocessor', basic_preprocessor),
+        ('classifier', NonProbaClassifier)
+    ])
+
+    return {'NonProbaModel': pipeline}
+
+@pytest.fixture(autouse=True)
+def cleanup_deployment_file():
+    """
+    Automatically delete the 'deployment_pipeline.pkl' file after each test, if it exists.
+    This prevents side effects between tests that may write this file to disk.
+    """
+    yield
+    if os.path.exists('deployment_pipeline.pkl'):
+        os.remove('deployment_pipeline.pkl')
 
 ## preprocess_data tests
 
@@ -642,3 +693,542 @@ class TestTrainEvaluateModel:
         assert len(model_results) == 1
         assert model_results[0]['name'] == 'BrokenModel'
         assert len(model_results[0].keys()) == 1
+
+
+## voting_model tests
+
+class TestVotingModel:
+    @staticmethod
+    def test_voting_model_with_valid_input(mock_data, mock_params_all):
+        """Test `voting_model()` with valid inputs."""
+        X_train, X_test, y_train, y_test = mock_data
+        best_models = {k: v['model'] for k, v in mock_params_all.items()}
+
+        result, metrics = voting_model(X_train, X_test, y_train, y_test, best_models, n_iter=7)
+
+        assert isinstance(result, dict)
+        assert 'VotingClassifier' in result
+        assert hasattr(result['VotingClassifier'], 'predict')
+        assert isinstance(metrics, list)
+        assert len(metrics) == 1
+
+        metric_entry = metrics[0]
+
+        for key in ['f1', 'recall', 'precision', 'roc_auc', 'accuracy']:
+            assert key in metric_entry
+            assert isinstance(metric_entry[key], float)
+
+
+    @staticmethod
+    def test_voting_model_with_empty_models_dict(mock_data):
+        """Test `voting_model()` with an empty models dictionary."""
+        X_train, X_test, y_train, y_test = mock_data
+        result, metrics = voting_model(X_train, X_test, y_train, y_test, {})
+
+        assert result == {}
+        assert metrics == []
+
+
+    @staticmethod
+    def test_voting_model_with_non_proba_models(mock_data, mock_params_non_proba):
+        """Test `voting_model()` with models that don't support 'predict_proba'."""
+        X_train, X_test, y_train, y_test = mock_data
+
+        best_model = mock_params_non_proba
+
+        result, metrics = voting_model(X_train, X_test, y_train, y_test, best_model, n_iter=1)
+
+        assert result == {}
+        assert metrics == []
+
+
+    @staticmethod
+    def test_voting_model_returns_expected_structure(mock_data, mock_params_logreg):
+        """Test if `voting_model()` returns the expected structure."""
+        X_train, X_test, y_train, y_test = mock_data
+        best_models = {k: v['model'] for k, v in mock_params_logreg.items()}
+
+        best_model, metrics = voting_model(X_train, X_test, y_train, y_test, best_models, n_iter=1)
+
+        assert isinstance(best_model, dict)
+        assert 'VotingClassifier' in best_model
+
+        metric = metrics[0]
+        assert isinstance(metric['predictions'], np.ndarray)
+        assert isinstance(metric['predictions_proba'], np.ndarray)
+        assert metric['predictions'].shape[0] == len(X_test)
+        assert metric['predictions_proba'].shape[0] == len(X_test)
+
+
+    @staticmethod
+    def test_voting_model_handles_exception(mock_data):
+        """Test how `voting_model()` handles an exception."""
+        X_train, X_test, y_train, y_test = mock_data
+
+        class BadModel(BaseEstimator, ClassifierMixin):
+            def fit(self, X, y): raise ValueError("fail")
+            def predict(self, X): return X
+
+        best_models = {'BadModel': create_mock_pipeline(BadModel())}
+
+        result, metrics = voting_model(X_train, X_test, y_train, y_test, best_models, n_iter=1)
+
+        assert result == {}
+        assert metrics == []
+
+
+    @staticmethod
+    @pytest.mark.parametrize("scoring", ["accuracy", "precision", "recall", "f1"])
+    def test_voting_model_with_different_scoring(mock_data, mock_params_logreg, scoring):
+        """Test `voting_model()` with different scoring metrics."""
+        X_train, X_test, y_train, y_test = mock_data
+        best_models = {k: v['model'] for k, v in mock_params_logreg.items()}
+
+        result, metrics = voting_model(X_train, X_test, y_train, y_test, best_models, metric=scoring, n_iter=1)
+
+        assert isinstance(result, dict)
+        assert 'VotingClassifier' in result
+        assert isinstance(metrics, list)
+        assert 'f1' in metrics[0]
+
+
+## comparative_models tests
+
+class TestComparativeModels:
+    @staticmethod
+    def test_comparative_models_success(sample_dataframe):
+        """Test `comparative_models()` with valid inputs."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+        target = 'target_col'
+
+        dummy_X = df.drop(columns=[target])
+        dummy_y = df[target]
+        X_train, X_test = dummy_X.iloc[:10], dummy_X.iloc[10:]
+        y_train, y_test = dummy_y.iloc[:10], dummy_y.iloc[10:]
+
+        numerical_features = ['low_num_int', 'high_num_float']
+        categorical_features = ['low_cat_str']
+
+        preprocessor = ColumnTransformer([
+            ('num', StandardScaler(), numerical_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ])
+
+        pipeline = Pipeline([
+            ('preprocessor', preprocessor),
+            ('classifier', LogisticRegression())
+        ])
+
+        pipeline.fit(X_train, y_train)
+
+        pipeline.predict = mock.MagicMock(return_value=np.ones(len(X_test)))
+        pipeline.predict_proba = mock.MagicMock(return_value=np.tile([0.3, 0.7], (len(X_test), 1)))
+
+        mock_best_models = {'RandomForest': pipeline}
+        mock_model_results = [{
+            'name': 'RandomForest',
+            'accuracy': 0.9,
+            'recall': 0.8,
+            'precision': 0.85,
+            'f1': 0.82,
+            'roc_auc': 0.88,
+            'params': {'n_estimators': 10},
+            'predictions': np.ones(len(X_test)),
+            'predictions_proba': np.ones(len(X_test))
+        }]
+
+        mock_voting_results = ({'VotingClassifier': pipeline}, [{
+            'name': 'VotingClassifier',
+            'accuracy': 0.92,
+            'recall': 0.84,
+            'precision': 0.87,
+            'f1': 0.85,
+            'roc_auc': 0.89,
+            'params': {'weights': [1, 2]},
+            'predictions': np.ones(len(X_test)),
+            'predictions_proba': np.ones(len(X_test))
+        }])
+
+        with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', return_value=(dummy_X, dummy_y, X_train, X_test, y_train, y_test, preprocessor, mock.MagicMock())), \
+            mock.patch('src.telco_customer_churn_analysis.model_utils.model_pipelines', return_value={'LogisticRegression': pipeline, 'RandomForest': pipeline}), \
+            mock.patch('src.telco_customer_churn_analysis.model_utils.hyperparameters', return_value={'RandomForest': {'params': {'n_estimators': [5]}}}), \
+            mock.patch('src.telco_customer_churn_analysis.model_utils.train_evaluate_model', return_value=(mock_best_models, mock_model_results)), \
+            mock.patch('src.telco_customer_churn_analysis.model_utils.voting_model', return_value=mock_voting_results):
+
+            all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, {'RandomForest': pipeline})
+
+            assert isinstance(all_models, dict)
+            assert 'VotingClassifier' in all_models
+            assert isinstance(all_results, pd.DataFrame)
+            assert not all_results.empty
+            assert isinstance(best_model, Pipeline)
+            assert isinstance(X_train_out, pd.DataFrame)
+            assert isinstance(X_test_out, pd.DataFrame)
+            assert isinstance(y_test_out, pd.Series)
+
+
+    @staticmethod
+    def test_comparative_models_missing_helper(sample_dataframe, mock_comparative_models):
+        """Test `comparative_models()` when missing a helper function."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+        target = 'target_col'
+
+        with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=NotImplementedError("Missing Function")):
+            all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
+
+            assert all_models == {}
+            assert all_results.empty
+            assert best_model is None
+
+
+    @staticmethod
+    def test_comparative_models_unexpected_exception(sample_dataframe, mock_comparative_models):
+        """Test how `comparative_models` handles an exception."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+        target = 'target_col'
+
+        with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=RuntimeError("Something broke")):
+            all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
+
+            assert all_models == {}
+            assert all_results.empty
+            assert best_model is None
+
+
+## profit_curve tests
+
+class TestProfitCurve:
+    @staticmethod
+    def test_profit_curve_basic_case():
+        """Test `profit_curve()` with a simple known case where results are predictable."""
+        labels = np.array([1, 0, 1, 0, 1])
+        predictions_proba = np.array([0.9, 0.1, 0.8, 0.2, 0.7])
+        median_value = 100.0
+        cost = 10.0
+        retention_rate = 0.5
+
+        best_threshold, best_profit, profit_values = profit_curve(median_value, cost, retention_rate, labels, predictions_proba)
+
+        assert isinstance(best_threshold, float)
+        assert 0.05 <= best_threshold <= 0.95
+        assert isinstance(best_profit, float)
+        assert isinstance(profit_values, dict)
+        assert len(profit_values) > 0
+        assert best_threshold <= 0.9
+
+
+    @staticmethod
+    def test_profit_curve_series_input():
+        """Test that `profit_curve()` works when inputs are pandas Series."""
+        labels = pd.Series([1, 1, 0, 0])
+        predictions_proba = pd.Series([0.8, 0.7, 0.2, 0.1])
+
+        best_threshold, best_profit, profit_values = profit_curve(200.0, 20.0, 0.6, labels, predictions_proba)
+
+        assert isinstance(best_threshold, float)
+        assert isinstance(best_profit, float)
+        assert isinstance(profit_values, dict)
+        assert all(isinstance(k, float) for k in profit_values.keys())
+        assert all(isinstance(v, float) for v in profit_values.values())
+
+
+    @staticmethod
+    def test_profit_curve_all_zero_predictions():
+        """Test `profit_curve()` behavior when all probabilities are zero (edge case). Should return 0.5 as default threshold and 0.0 as profit."""
+        labels = np.array([0, 1, 1])
+        predictions_proba = np.array([0.1, 0.2, 0.3])
+
+        best_threshold, best_profit, profit_values = profit_curve(100.0, 20.0, 0.3, labels, predictions_proba)
+
+        assert best_threshold == 0.1
+        assert best_profit == 20.0
+        assert isinstance(profit_values, dict)
+        assert len(profit_values) > 0
+
+
+    @staticmethod
+    def test_profit_curve_invalid_shape_matrix():
+        """Force `profit_curve()` to skip thresholds where confusion matrix is invalid."""
+        labels = np.array([1, 1, 1, 1, 1])
+        predictions_proba = np.array([0.9, 0.8, 0.85, 0.95, 0.7])
+
+        best_threshold, best_profit, profit_values = profit_curve(100.0, 20.0, 0.2, labels, predictions_proba)
+
+        assert isinstance(best_threshold, float)
+        assert isinstance(best_profit, float)
+        assert isinstance(profit_values, dict)
+        assert len(profit_values) > 0
+
+
+## deployment_model tests
+
+class TestDeploymentModel:
+    @staticmethod
+    def test_deployment_model_successful(monkeypatch, sample_dataframe):
+        """Test `deployment_model` with valid inputs."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+
+        target = 'target_col'
+
+        preprocessor = mock.MagicMock()
+        classifier = LogisticRegression()
+        fitted_pipeline = Pipeline([
+            ('preprocessor', preprocessor),
+            ('classifier', classifier)
+        ])
+
+        drop_cols = ['drop_me', 'high_cat_str']
+        dummy_X = df.drop(columns=[target] + drop_cols, errors='ignore')
+        dummy_y = df[target]
+
+        monkeypatch.setattr('tests.test_model_utils.preprocess_data',
+                            lambda *args, **kwargs: (dummy_X, dummy_y, None, None, None, None, preprocessor, None)
+                            )
+        
+        with mock.patch('joblib.dump') as mock_joblib_dump:
+            deployment_pipeline = deployment_model(df, fitted_pipeline, target, cols_to_drop=drop_cols)
+
+            assert isinstance(deployment_pipeline, Pipeline)
+            assert 'classifier' in deployment_pipeline.named_steps
+            assert 'preprocessor' in deployment_pipeline.named_steps
+            mock_joblib_dump.assert_called_once()
+            assert mock_joblib_dump.call_args[0][1] == 'deployment_pipeline.pkl'
+
+
+    @staticmethod
+    def test_deployment_model_missing_preprocessor_params(monkeypatch, sample_dataframe):
+        """Test `deployment_model()` handles exceptions raises during preprocessing."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+        target = 'target_col'
+
+        preprocessor = mock.MagicMock()
+        classifier = LogisticRegression()
+        model = Pipeline([
+            ('preprocessor', preprocessor),
+            ('classifier', classifier)
+        ])
+
+        monkeypatch.setattr(
+            'tests.test_model_utils.preprocess_data', mock.Mock(side_effect=Exception("preprocessing error"))
+        )
+
+        drop_cols = ['drop_me', 'high_cat_str']
+        with mock.patch("joblib.dump") as mock_joblib_dump:
+            deployment_pipeline = deployment_model(df, model, target, cols_to_drop=drop_cols)
+
+            assert isinstance(deployment_pipeline, Pipeline)
+            mock_joblib_dump.assert_called_once()
+
+
+    @staticmethod
+    def test_deployment_model_value_error_invalid_model(sample_dataframe):
+        """Test `deployment_model()` raises ValueError when the model is invalid."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+        target = 'target_col'
+
+        model = Pipeline([
+            ('preprocessor', mock.MagicMock())
+        ])
+
+        with pytest.raises(ValueError, match="must contain a 'classifier' step"):
+            deployment_model(df, model, target, cols_to_drop=None)
+
+
+    @staticmethod
+    def test_deployment_model_cols_to_drop_variants(monkeypatch, sample_dataframe):
+        """Test `deployment_model()` with different variants of 'cols_to_drop' inputs."""
+        df = sample_dataframe.copy()
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+        target = 'target_col'
+
+        drop_cols = ['drop_me', 'high_cat_str']
+        dummy_X = df.drop(columns=[target] + drop_cols)
+        dummy_y = df[target]
+        preprocessor = mock.MagicMock()
+        classifier = LogisticRegression()
+        pipeline = Pipeline([
+            ('preprocessor', preprocessor),
+            ('classifier', classifier)
+        ])
+
+        monkeypatch.setattr('tests.test_model_utils.preprocess_data',
+                            lambda *args, **kwargs: (dummy_X, dummy_y, None, None, None, None, preprocessor, None)
+                            )
+        
+        with mock.patch('joblib.dump') as mock_joblib_dump:
+            deployment_pipeline = deployment_model(df, pipeline, target, 'high_cat_str')
+            assert isinstance(deployment_pipeline, Pipeline)
+
+            deployment_pipeline = deployment_model(df, pipeline, target, drop_cols)
+            assert isinstance(deployment_pipeline, Pipeline)
+
+            assert mock_joblib_dump.call_count == 2
+
+
+## predict_churn tests
+
+class TestPredictChurn:
+    @staticmethod
+    def test_predict_churn_successful(sample_dataframe):
+        """Test `predict_churn()` with valid inputs."""
+        df = sample_dataframe.copy()
+        df['Contract'] = ['Month-to-month'] * 10 + ['Two year'] * 10
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+
+        mock_model = mock.MagicMock(spec=Pipeline)
+        mock_model.predict_proba.return_value = np.tile([0.4, 0.6], (20, 1))
+
+        with mock.patch('joblib.load', return_value=mock_model):
+            result_df = predict_churn(df, threshold=0.5, model_path='deployment_model.pkl')
+
+            assert isinstance(result_df, pd.DataFrame)
+            assert not result_df.empty
+            assert all(result_df['Contract'] == 'Month-to-month')
+            assert all(result_df['Churn Probability'] >= 0.5)
+            assert result_df['Churn Probability'].is_monotonic_decreasing
+
+
+    @staticmethod
+    def test_predict_churn_file_not_found(sample_dataframe):
+        """Test `predict_churn()` when file is not found."""
+        result_df = predict_churn(sample_dataframe, threshold=0.6)
+        assert isinstance(result_df, pd.DataFrame)
+        assert result_df.empty
+
+
+    @staticmethod
+    def test_predict_churn_prediction_error(sample_dataframe):
+        """Test `predict_churn()` returns an empty DataFrame if the model is not fitted."""
+        mock_model = mock.MagicMock(spec=Pipeline)
+        mock_model.predict_proba.side_effect = NotFittedError("Model not fitted")
+
+        with mock.patch('joblib.load', return_value=mock_model):
+            result = predict_churn(sample_dataframe, threshold=0.6)
+            assert isinstance(result, pd.DataFrame)
+            assert result.empty
+
+
+    @staticmethod
+    def test_predict_churn_threshold_filtering(sample_dataframe):
+        """Test `predict_churn` filters results based on the probability threshold."""
+        df = sample_dataframe.copy()
+        df['Contract'] = ['Month-to-month'] * 20
+        df['target_col'] = (df['target_col'] > 0.5).astype(int)
+
+        proba = np.linspace(0.1, 1.0, len(df))
+        predict_proba = np.stack([1 - proba, proba], axis=1)
+
+        mock_model = mock.MagicMock(spec=Pipeline)
+        mock_model.predict_proba.return_value = predict_proba
+
+        with mock.patch('joblib.load', return_value=mock_model):
+            threshold = 0.8
+            result = predict_churn(df, threshold=threshold)
+
+            assert not result.empty
+            assert all(result['Contract'] == 'Month-to-month')
+            assert all(result['Churn Probability'] >= threshold)
+            assert len(result) == 5
+
+
+    @staticmethod
+    def test_predict_churn_no_customer_match(sample_dataframe):
+        """Test `predict_churn()` returns an empty DataFrame when no customers meet the threshold criteria."""
+        df = sample_dataframe.copy()
+        df['Contract'] = ['Two year'] * 20
+
+        mock_model = mock.MagicMock(spec=Pipeline)
+        mock_model.predict_proba.return_value = np.tile([0.3, 0.7], (20, 1))
+
+        with mock.patch('joblib.load', return_value=mock_model):
+            result = predict_churn(df, threshold=0.5)
+
+            assert isinstance(result, pd.DataFrame)
+            assert result.empty
+
+
+## abc_test tests
+
+class TestAbcTest:
+    @staticmethod
+    def test_abc_test_assigns_groups_correctly(sample_dataframe):
+        """Test `abc_test()` assigns the groups correctly."""
+        df = sample_dataframe.copy()
+        df['Contract'] = ['Month-to-month'] * len(df)
+        df['Churn Probability'] = np.linspace(0.6, 0.99, len(df))
+        df['Intervention Flag'] = 1
+
+        result = abc_test(df, random_seed=123)
+
+        assert not result.empty
+        assert 'Group' in result.columns
+        assert 'Intervention Details' in result.columns
+        assert set(result['Group']).issubset({'A (Control)', 'B (Price Offer)', 'C (Service Offer)'})
+        assert set(result['Intervention Details']).issubset({
+            '10% Off 1-Year Contract', '6 Months Free Tech Support', 'None (Control)'
+        })
+
+
+    @staticmethod
+    def test_abc_test_handles_empty_dataframe():
+        """Test `abc_test` returns an empty DataFrame if the input is also an empty DataFrame."""
+        empty_df = pd.DataFrame()
+        result = abc_test(empty_df)
+
+        assert result.empty
+
+
+    @staticmethod
+    def test_abc_test_reproducibility(sample_dataframe):
+        """Test `abc_test()` returns consistent output when the random_seed and inputs are the same."""
+        df = sample_dataframe.copy()
+        df['Contract'] = ['Month-to-month'] * len(df)
+        df['Churn Probability'] = np.linspace(0.6, 0.99, len(df))
+        df['Intervention Flag'] = 1
+
+        result1 = abc_test(df, random_seed=123)
+        result2 = abc_test(df, random_seed=123)
+
+        pd.testing.assert_frame_equal(result1[['Group', 'Intervention Details']], result2[['Group', 'Intervention Details']])
+
+
+    @staticmethod
+    def test_abc_test_intervention_mapping():
+        """Test `abc_test()` correctly assigns correct 'Intervention Details' based on the 'Group' value."""
+        test_df = pd.DataFrame({'Group': ['A (Control)', 'B (Price Offer)', 'C (Service Offer)']})
+
+        def map_intervention(group):
+            if group == 'B (Price Offer)':
+                return '10% Off 1-Year Contract'
+            elif group == 'C (Service Offer)':
+                return '6 Months Free Tech Support'
+            else:
+                return 'None (Control)'
+            
+        test_df['Intervention Details'] = test_df['Group'].apply(map_intervention)
+
+        expected = ['None (Control)', '10% Off 1-Year Contract', '6 Months Free Tech Support']
+
+        assert list(test_df['Intervention Details']) == expected
+
+
+    @staticmethod
+    def test_abc_test_group_distribution(sample_dataframe):
+        """Test `abc_test()` assigns all customers to one of the three valid groups."""
+        df = sample_dataframe.copy()
+        df['Contract'] = ['Month-to-month'] * len(df)
+        df['Churn Probability'] = np.linspace(0.6, 0.99, len(df))
+        df['Intervention Flag'] = 1
+
+        result = abc_test(df, random_seed=123)
+
+        group_counts = result['Group'].value_counts()
+
+        assert group_counts.sum() == len(df)
+        assert all(group in group_counts for group in ['A (Control)', 'B (Price Offer)', 'C (Service Offer)'])

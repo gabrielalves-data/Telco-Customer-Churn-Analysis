@@ -742,7 +742,7 @@ def profit_curve(median_value: float, cost: float, retention_rate: float,
     for t in thresholds:
         predictions = (predictions_proba > t).astype(int)
 
-        matrix = confusion_matrix(labels, predictions)
+        matrix = confusion_matrix(labels, predictions, labels=[0, 1])
 
         if matrix.shape != (2, 2):
             continue
