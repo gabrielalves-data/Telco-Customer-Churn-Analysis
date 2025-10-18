@@ -910,7 +910,9 @@ class TestProfitCurve:
         cost = 10.0
         retention_rate = 0.5
 
-        best_threshold, best_profit, profit_values = profit_curve(median_value, cost, retention_rate, labels, predictions_proba)
+        model_df = pd.DataFrame({'predictions_proba': [predictions_proba]})
+
+        best_threshold, best_profit, profit_values = profit_curve(model_df, median_value, cost, retention_rate, labels)
 
         assert isinstance(best_threshold, float)
         assert 0.05 <= best_threshold <= 0.95
@@ -926,7 +928,9 @@ class TestProfitCurve:
         labels = pd.Series([1, 1, 0, 0])
         predictions_proba = pd.Series([0.8, 0.7, 0.2, 0.1])
 
-        best_threshold, best_profit, profit_values = profit_curve(200.0, 20.0, 0.6, labels, predictions_proba)
+        model_df = pd.DataFrame({'predictions_proba': [predictions_proba]})
+
+        best_threshold, best_profit, profit_values = profit_curve(model_df, 200.0, 20.0, 0.6, labels)
 
         assert isinstance(best_threshold, float)
         assert isinstance(best_profit, float)
@@ -941,7 +945,9 @@ class TestProfitCurve:
         labels = np.array([0, 1, 1])
         predictions_proba = np.array([0.1, 0.2, 0.3])
 
-        best_threshold, best_profit, profit_values = profit_curve(100.0, 20.0, 0.3, labels, predictions_proba)
+        model_df = pd.DataFrame({'predictions_proba': [predictions_proba]})
+
+        best_threshold, best_profit, profit_values = profit_curve(model_df, 100.0, 20.0, 0.3, labels)
 
         assert best_threshold == 0.1
         assert best_profit == 20.0
@@ -955,7 +961,9 @@ class TestProfitCurve:
         labels = np.array([1, 1, 1, 1, 1])
         predictions_proba = np.array([0.9, 0.8, 0.85, 0.95, 0.7])
 
-        best_threshold, best_profit, profit_values = profit_curve(100.0, 20.0, 0.2, labels, predictions_proba)
+        model_df = pd.DataFrame({'predictions_proba': [predictions_proba]})
+
+        best_threshold, best_profit, profit_values = profit_curve(model_df, 100.0, 20.0, 0.2, labels)
 
         assert isinstance(best_threshold, float)
         assert isinstance(best_profit, float)

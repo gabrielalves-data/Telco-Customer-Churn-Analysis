@@ -14,7 +14,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from typing import Union, Dict, List, Any, Optional, Tuple
 import joblib
 
-from src.telco_customer_churn_analysis.utils import (safe_display)
+from .utils import (safe_display)
 
 def preprocess_data(df: pd.DataFrame, target: str,
                     cols_to_drop: Optional[Union[str, List[str]]] = None, test_size: float = 0.2,
@@ -671,6 +671,22 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
 
         print('\n','-' * 50,f'Best Model: {best_model_name} by Metric: {metric}','-' * 50,'\n')
 
+        try:
+            joblib.dump({
+                'all_models': all_models,
+                'all_results': all_results,
+                'model_untrained': model_object_by_metric,
+                'X_train': X_train,
+                'X_test': X_test,
+                'y_test': y_test
+                },
+                'model_results.pkl'
+                )
+            print("Deployment pipeline saved successfully to 'model_results.pkl'.")
+
+        except Exception as e:
+            print("Error saving model with joblib: {e}.")
+
         return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
 
     except NotImplementedError as e:
@@ -685,58 +701,86 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
 ## MLOPS, Optimization and Business Action Functions
 
 
-def profit_curve(median_value: float, cost: float, retention_rate: float,
-                 labels: Union[np.ndarray, pd.Series], predictions_proba: Union[np.ndarray, pd.Series]) -> Tuple[float, float, Dict[float, float]]:
+def profit_curve(model_df: pd.DataFrame, median_value: float, cost: float, retention_rate: float,
+                 labels: Union[np.ndarray, pd.Series]):
     """
     Calculates the optimal prediction threshold and maximum expected profit
-    for a classification model based on a defined cost/benefit matrix.
+    for a classification model using a cost-sensitive profit evaluation.
 
-    This function simulates the financial outcome (profit or loss) of applying
-    an intervention (e.g., a retention offer) to customers identified as high-risk
-    across a fine-grained range of probability thresholds. It uses a cost-sensitive
-    evaluation defined by the business variables.
+    This function assumes the model's predicted probabilities for the positive class
+    have already been computed and are stored in the 'predictions_proba' column of
+    the first row of the input DataFrame.
 
-    The financial matrix is calculated as follows:
-    - True Positive (TP): (Median Customer Value * Retention Rate) - Cost of Intervention
-    - False Positive (FP): Cost of Intervention (Intervention on non-churner)
-    - False Negative (FN): Median Customer Value (Lost value from missed churner)
-    - True Negative (TN): 0 (Correctly ignored)
+    Financial logic:
+    - True Positive (TP): (LTV * retention rate) - cost of intervention
+    - False Positive (FP): - cost (intervention wasted on non-churner)
+    - False Negative (FN): - LTV (lost value due to missed churn)
+    - True Negative (TN): 0 (correct non-intervention)
 
     Parameters
     ----------
-    median_value (float): The median or average lifetime value (LTV) of a customer,
-                          used as the value lost for a False Negative.
-    cost (float): The cost of the intervention (e.g., the cost of the retention offer).
-    retention_rate (float): The expected success rate of the intervention (e.g.,
-                            if 40% of customers accept the offer and stay, use 0.40).
-    labels (numpy.ndarray or pandas.Series): The true binary target labels (Y_test).
-    predictions_proba (numpy.ndarray or pandas.Series): The predicted probabilities
-                                                        for the positive class (Churn=1).
+    model_df : pandas.DataFrame
+        DataFrame (typically from comparative_models) with a 'predictions_proba'
+        column in the first row containing an array of predicted probabilities.
+
+    median_value : float
+        Median customer lifetime value (CLTV), used to calculate opportunity cost.
+
+    cost : float
+        Cost of applying an intervention (e.g., retention offer).
+
+    retention_rate : float
+        Likelihood that an intervention will successfully retain the customer.
+
+    labels : array-like
+        Ground truth target labels (0 or 1) for the test set.
 
     Returns
     -------
-    tuple
-        - best_threshold (float): The prediction probability threshold (e.g., 0.650)
-                                  that maximizes the total expected profit.
-        - best_profit (float): The maximum total profit achieved at the best_threshold.
-        - profit_values (dict): A dictionary mapping every threshold tested to its
-                                corresponding total profit, useful for plotting the curve.
+    best_threshold : float
+        Threshold that yields the maximum expected profit.
+
+    best_profit : float
+        Maximum profit achievable with the optimal threshold.
+
+    profit_values : dict
+        Dictionary mapping thresholds to calculated profits.
     """
+    if not isinstance(model_df, pd.DataFrame):
+        raise TypeError("'model_df' must be a pandas DataFrame.")
+    
+    if 'predictions_proba' not in model_df.columns:
+        raise ValueError("'model_df' must contain a 'predictions_proba' column.")
+    
+    if not isinstance(median_value, (int, float)) or median_value < 0:
+        raise ValueError("'median_value' must be a non-negative number.")
+    
+    if not isinstance(cost, (int, float)) or cost < 0:
+        raise ValueError("'cost' must be a non-negative number.")
+    
+    if not (0 <= retention_rate <= 1):
+        raise ValueError("'retention_rate' must be a float between 0 and 1.")
+    
+    predictions_proba = model_df.iloc[0]['predictions_proba']
+
+    if isinstance(predictions_proba, pd.Series):
+        predictions_proba = predictions_proba.values
+    
+    elif not isinstance(predictions_proba, np.ndarray):
+        predictions_proba = np.array(predictions_proba)
+
+    if predictions_proba.ndim != 1:
+        raise ValueError("Expected 1D 'predictions_proba' array.")
+
+    if isinstance(labels, pd.Series):
+        labels = labels.values
+    
     TP_value = (median_value * retention_rate) - cost
     FP_value = cost
     FN_value = median_value
     TN_value = 0
 
-    if isinstance(predictions_proba, pd.Series):
-        predictions_proba = predictions_proba.values
-
-    if isinstance(labels, pd.Series):
-        labels = labels.values
-
-    safe_display(predictions_proba)
-
     thresholds = np.round(np.arange(0.050, 0.950 + 0.001, 0.001), 4)
-
     profit_values: Dict[float, float] = {}
 
     for t in thresholds:
@@ -747,10 +791,8 @@ def profit_curve(median_value: float, cost: float, retention_rate: float,
         if matrix.shape != (2, 2):
             continue
 
-        TN = matrix[0, 0]
-        FP = matrix[0, 1]
-        FN = matrix[1, 0]
-        TP = matrix[1, 1]
+        TN, FP = matrix[0]
+        FN, TP = matrix[1]
 
         profit = (TP * TP_value) - (FP * FP_value) - (FN * FN_value)
 
@@ -760,8 +802,7 @@ def profit_curve(median_value: float, cost: float, retention_rate: float,
         best_threshold, best_profit = max(profit_values.items(), key=lambda item: item[1])
 
     else:
-        best_threshold = 0.500
-        best_profit = 0.0
+        best_threshold, best_profit = 0.500, 0.0
         print("Warning: Could not calculate profit curve. Check input data.")
 
 
@@ -812,7 +853,7 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
         cols_to_drop_list = cols_to_drop
 
     try:
-        X, y, _, _, _, _, preprocessor_unfitted, _ = preprocess_data(df, target=target,
+        X, y, X_train, X_test, _, y_test, preprocessor_unfitted, _ = preprocess_data(df, target=target,
                                                             cols_to_drop=cols_to_drop_list)
 
     except Exception as e:
@@ -820,6 +861,7 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
             preprocessor_unfitted = clone(model.named_steps['preprocessor'])
             X = df.drop(columns=[target] + cols_to_drop_list, errors='ignore')
             y = df[target]
+            X_train, X_test, y_test = None, None, None
 
         else:
             raise ValueError(f"Could not initialize data or extract preprocessor. Details {e}.")
@@ -840,7 +882,7 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
     print('Retraining Complete.')
 
     try:
-        joblib.dump(deployment_pipeline, 'deployment_pipeline.pkl')
+        joblib.dump(deployment_pipeline,'deployment_pipeline.pkl')
         print("Deployment pipeline saved successfully to 'deployment_pipeline.pkl'.")
 
     except Exception as e:
@@ -902,6 +944,7 @@ def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = 'deploym
         print(f"Error during prediction: {e}.")
         return pd.DataFrame()
 
+    threshold = float(threshold)
     df_scored = df.copy()
     df_scored['Churn Probability'] = proba
     df_scored['Intervention Flag'] = (proba >= threshold).astype(int)

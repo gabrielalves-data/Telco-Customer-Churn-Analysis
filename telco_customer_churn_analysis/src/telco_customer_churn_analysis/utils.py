@@ -2,6 +2,7 @@ import pandas as pd
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 from IPython import display
 import matplotlib.pyplot as plt
+import matplotlib
 import seaborn as sns
 import pingouin
 import warnings
@@ -532,7 +533,7 @@ def drop_labels(df: pd.DataFrame, labels: Union[str, List[str]] = None, axis: Un
 def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal['x', 'y'] = 'x',
                hue: Optional[str] = None, order: Optional[List[Union[str, float, int]]] = None,
                palette: Optional[Union[str, List[str], Dict[str, str]]] = None,
-               tick_rotation: Union[int, float] = 0) -> None:
+               tick_rotation: Union[int, float] = 0, ax: Optional[matplotlib.axes._axes.Axes] = None) -> None:
     """
     Creates, labels, and displays a seaborn count plot with bar labels.
 
@@ -561,11 +562,13 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
         The color palette to use. Can be a name, list of colors, or a dict mapping hue levels to colors.
     tick_rotation : int or float, optional
         The rotation angle (in degrees) for the tick labels on the data axis. Defaults to 0.
+    ax : matplotlib.axes.Axes, optional
+        An optional matplotlib Axes object to plot into. If None, a new plot is created internally.
 
     Returns
     -------
     None
-        The function displays the plot using plt.show().
+        The function displays the plot using plt.show(), if no external Axes object is provided.
 
     Raises
     ------
@@ -602,7 +605,13 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
         raise ValueError(f"ValueError: 'tick_rotation' must be a number (int or float), but received {type(tick_rotation).__name__}.")
 
     try:
-        fig, ax = plt.subplots(figsize=(10,6))
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(4,2))
+        elif isinstance(ax, np.ndarray):
+            if ax.size == 1:
+                ax = ax[0]
+            else:
+                raise ValueError("Expected a single Axes object, but received multiple Axes.")
 
         plot_df = df.copy()
         plot_df[col] = plot_df[col].astype(str)
@@ -619,12 +628,12 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
 
         if axis == 'x':
             ax.set_xlabel(label)
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=tick_rotation)
+            ax.tick_params(axis='x', labelrotation=tick_rotation)
             ax.set_ylabel('Count')
 
         else:
             ax.set_ylabel(label)
-            ax.set_yticklabels(ax.get_yticklabels(), rotation=tick_rotation)
+            ax.tick_params(axis='y', labelrotation=tick_rotation)
             ax.set_xlabel('Count')
 
         for container in ax.containers:
@@ -632,8 +641,9 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
 
         ax.set_title(title)
 
-        plt.tight_layout()
-        plt.show()
+        if ax is None:
+            plt.tight_layout()
+            plt.show()
 
     except Exception as e:
         raise RuntimeError(f"RuntimeError: An unexpected error occurred during plot generation. Details: {e}.")
@@ -641,7 +651,7 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
 
 def histogram(title: str, label: str, df: pd.DataFrame, col: str,
               bins: Union[int, List[Union[int, float]]], axis: Literal['x', 'y'] = 'x',
-              hue: Optional[str] = None, kde: bool = False) -> None:
+              hue: Optional[str] = None, kde: bool = False, ax: Optional[matplotlib.axes._axes.Axes] = None) -> None:
     """
     Generates and displays a histogram using seaborn.
 
@@ -671,11 +681,13 @@ def histogram(title: str, label: str, df: pd.DataFrame, col: str,
         Defaults to None.
     kde : bool, optional
         If True, a Kernel Density Estimate line is overlaid on the plot. Defaults to False.
+    ax : matplotlib.axes.Axes, optional
+        An optional matplotlib Axes object to plot into. If None, a new plot is created internally.
 
     Returns
     -------
     None
-        The function displays the plot using plt.show().
+        The function displays the plot using plt.show(), if no external Axes object is provided.
 
     Raises
     ------
@@ -709,7 +721,8 @@ def histogram(title: str, label: str, df: pd.DataFrame, col: str,
         raise ValueError(f"ValueError: 'axis' must be 'x' or 'y', but received '{axis}'.")
 
     try:
-        fig, ax = plt.subplots(figsize=(10,6))
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(4,2))
 
         plot_kwargs = {'data': df, 'bins': bins, 'hue': hue, 'kde': kde}
 
@@ -728,15 +741,16 @@ def histogram(title: str, label: str, df: pd.DataFrame, col: str,
 
         ax.set_title(title)
 
-        plt.tight_layout()
-        plt.show()
+        if ax is None:
+            plt.tight_layout()
+            plt.show()
 
     except Exception as e:
         raise RuntimeError(f"RuntimeError: An unexpected error occurred during plot generation. Check if column 'col' is numerical. Details: {e}.")
     
 
 def heatmap(title: str, df: pd.DataFrame, annot: bool = True, cmap: str = 'coolwarm',
-            fontsize: Union[int, float] = 7, num_decimals: int = 2) -> None:
+            fontsize: Union[int, float] = 7, num_decimals: int = 2, ax: Optional[matplotlib.axes._axes.Axes] = None) -> None:
     """
     Generates and displays a correlation heatmap of a DataFrame.
 
@@ -761,6 +775,8 @@ def heatmap(title: str, df: pd.DataFrame, annot: bool = True, cmap: str = 'coolw
     num_decimals : int, optional
         The number of decimal places to display for the correlation values.
         Defaults to 2.
+    ax : matplotlib.axes.Axes, optional
+        An optional matplotlib Axes object to plot into. If None, a new plot is created internally.
 
     Returns
     -------
@@ -800,22 +816,24 @@ def heatmap(title: str, df: pd.DataFrame, annot: bool = True, cmap: str = 'coolw
 
         if corr_matrix.empty:
             raise ValueError(f"ValueError: DataFrame contains no numeric columns to calculate a correlation matrix.")
-
-        n_cols = corr_matrix.shape[0]
-        fig_size = max(6, n_cols / 2)
-        plt.figure(figsize=(fig_size, fig_size))
-
+        
         fmt_str = f'.{num_decimals}f'
 
+        if ax is None:
+            n_cols = corr_matrix.shape[0]
+            fig_size = max(6, n_cols / 2)
+            fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+
         sns.heatmap(corr_matrix, annot=annot, cmap=cmap, fmt=fmt_str,
-                    annot_kws={'fontsize': fontsize}, cbar=True, linewidth=0.5, linecolor='black')
+                    annot_kws={'fontsize': fontsize}, cbar=True, linewidth=0.5, linecolor='black', ax=ax)
 
-        plt.title(title)
-        plt.yticks(rotation=0)
-        plt.xticks(rotation=90)
+        ax.set_title(title)
+        ax.tick_params(axis='y', rotation=0)
+        ax.tick_params(axis='x', rotation=90)
 
-        plt.tight_layout()
-        plt.show()
+        if ax is None:
+            plt.tight_layout()
+            plt.show()
 
     except ValueError as e:
         raise e
@@ -830,7 +848,7 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
                  axis: Literal['x', 'y'] = 'x', hue: Optional[str] = None,
                  order: Optional[List[Union[str, float, int]]] = None,
                  palette: Optional[Union[str, List[str], Dict[str, str]]] = None,
-                 tick_rotation: Union[int, float] = 0, show_plot: bool = True) -> pd.DataFrame:
+                 tick_rotation: Union[int, float] = 0, show_plot: bool = True, ax: Optional[matplotlib.axes._axes.Axes] = None) -> pd.DataFrame:
     """
     Bins a numerical column and optionally generates a count plot of the binned data.
 
@@ -873,12 +891,15 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
         The rotation angle for axis ticks. Defaults to 0.
     show_plot : bool, optional
         If True, the count plot is generated and displayed. Defaults to True.
+    ax : matplotlib.axes.Axes, optional
+        An optional matplotlib Axes object to plot into. If None, a new plot is created internally.
 
     Returns
     -------
     pandas.DataFrame
-        A copy of the original DataFrame with the new binned column (`new_col`) added.
-
+        Returns a copy of the original DataFrame with the new binned column added.
+        If `show_plot` is True, returns the matplotlib Axes object of the plot.
+        
     Raises
     ------
     TypeError
@@ -935,14 +956,15 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
         raise RuntimeError(f"RuntimeError: An unexpected error occurred during binning of column {col}. Details: {e}.")
 
     if show_plot:
-      try:
-        count_plot(title=title, label=label, df=df_new, col=new_col, axis=axis, hue=hue, order=plot_order, palette=palette, tick_rotation=tick_rotation)
+        try:
+            count_plot(title=title, label=label, df=df_new, col=new_col, axis=axis, hue=hue, order=plot_order, palette=palette, tick_rotation=tick_rotation, ax=ax)
+            return ax
 
-      except NameError:
-        warnings.warn("Warning: The 'count_plot' function is required but not defined in the current scope. Plotting skipped.")
+        except NameError:
+            warnings.warn("Warning: The 'count_plot' function is required but not defined in the current scope. Plotting skipped.")
 
-      except Exception as e:
-        raise RuntimeError(f"RuntimeError: Plotting failed for binned column '{new_col}'. Details: {e}.")
+        except Exception as e:
+            raise RuntimeError(f"RuntimeError: Plotting failed for binned column '{new_col}'. Details: {e}.")
 
     return df_new
 
