@@ -1,34 +1,32 @@
 import pandas as pd
-import os
-import kagglehub
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 import matplotlib.pyplot as plt
+from typing import Optional
 
 from .model_utils import (preprocess_data, model_pipelines, hyperparameters, train_evaluate_model,
                                                            voting_model, comparative_models, profit_curve, deployment_model,
                                                            predict_churn, abc_test
                                                            )
-from .utils import (safe_display, read_excel, df_head,
+
+from .utils import (kaggle_download, safe_display, read_excel, df_head,
                                                      col_replace, null_rows, df_loc, df_aggfunc,
                                                      drop_labels, count_plot, histogram, heatmap,
-                                                     bin_and_plot, chi_squared_test, generate_data)
+                                                     bin_and_plot, chi_squared_test, generate_data, features_to_df)
+
 from .model_xai import (model_global_explainer, model_local_explainer)
 
 def data_preprocessing():
     """
     Download, clean, and preprocess the Telco Customer Churn dataset.
 
-    This function downloads the dataset from Kaggle, loads it into a DataFrame,
-    cleans the 'Total Charges' column by handling missing or malformed data,
-    calculates missing 'Total Charges' values, drops irrelevant columns, and
-    prints summaries about missing values and churn statistics.
-
-    Parameters
-    ----------
-    None
+    This function first checks if the dataset file already exists locally.
+    If not, it downloads the dataset from Kaggle via kagglehub. It then
+    loads the dataset into a DataFrame, cleans the 'Total Charges' column,
+    fills missing values, and drops irrelevant columns. Summary statistics
+    are printed for basic inspection.
 
     Returns
     -------
@@ -38,14 +36,11 @@ def data_preprocessing():
     Raises
     ------
     FileNotFoundError
-        If the dataset cannot be downloaded or found.
+        If the dataset cannot be found or downloaded.
     ValueError
         If data conversion to numeric fails for 'Total Charges'.
     """
-    path = kagglehub.dataset_download("yeanzc/telco-customer-churn-ibm-dataset")
-    filename = 'Telco_customer_churn.xlsx'
-    full_path = os.path.join(path, filename)
-
+    full_path = kaggle_download()
     df = read_excel(full_path)
     df_head(df)
 
@@ -57,6 +52,9 @@ def data_preprocessing():
     total_charges_null = null_rows(df, 'Total Charges')
     total_charges = df_loc(df, total_charges_null, 'Monthly Charges') * df_loc(df, total_charges_null, 'Tenure Months')
     df.loc[total_charges_null, 'Total Charges'] = total_charges
+
+    top_20_cities = df['City'].value_counts().nlargest(20).index
+    df['City'] = df['City'].apply(lambda x: x if x in top_20_cities else 'Other')
 
     missing_rows = null_rows(df).sum()
     print('--- Number of Missing Values by Column ---')
@@ -105,14 +103,14 @@ def exploratory_analysis(df):
     """
     plot_funcs = []
 
-    top_10_cities = df['City'].value_counts().head(10).index
-    filtered_df = df[df['City'].isin(top_10_cities)]
+    top_20_cities = df['City'].value_counts().head(20).index
+    filtered_df = df[df['City'].isin(top_20_cities)]
 
-    plot_funcs.append(lambda ax: count_plot('Distribution of Customers by City', 'City', filtered_df, 'City', order=top_10_cities, tick_rotation=45 ,ax=ax))
+    plot_funcs.append(lambda ax: count_plot('Distribution of Customers by City', 'City', filtered_df, 'City', order=top_20_cities, tick_rotation=45 ,ax=ax))
     plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Gender', 'Gender', df, 'Gender', ax=ax))
     plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Seniority', 'Senior Citizen', df, 'Senior Citizen', ax=ax))
     plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Having a Partner', 'Partner', df, 'Partner', ax=ax))
-    plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Tenure Months', 'Tenure Months', df, 'Tenure Months', tick_rotation=90, ax=ax))
+    plot_funcs.append(lambda ax: histogram('Distribution of Customers by Tenure Months', 'Tenure Months', df, 'Tenure Months', 20, ax=ax))
     plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Having Phone Service', 'Phone Service', df, 'Phone Service', ax=ax))
     plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Having Multiple Lines', 'Multiple Lines', df, 'Multiple Lines', ax=ax))
     plot_funcs.append(lambda ax: count_plot('Distribution of Customers by Having Internet Service', 'Internet Service', df, 'Internet Service', ax=ax))
@@ -140,16 +138,12 @@ def exploratory_analysis(df):
 
     df_churn = df[df['Churn Value'] == 1]
 
-    print('--- Distribution of Monthly Charges of Churned Customers ---')
     plot_funcs.append(lambda ax: histogram('Distribution of Churned Customers Monthly Charges', 'Monthly Charges', df_churn, 'Monthly Charges', 20, ax=ax))
 
-    print('--- Distribution of Tenure Months of Churned Customers ---')
     plot_funcs.append(lambda ax: histogram('Distribution of Churned Customers Tenure Months', 'Tenure Months', df_churn, 'Tenure Months', 20, ax=ax))
 
-    print('--- Distribution of Churn Score of Churned Customers ---')
     plot_funcs.append(lambda ax: histogram('Distribution of Churned Customers Churn Score', 'Churn Score', df_churn, 'Churn Score', 20, ax=ax))
 
-    print('--- Distribution of CLTV of Churned Customers ---')
     print('\nMedian CLTV of churn users that have >= 70 Tenure Months: ' + str(df_churn[df_churn['Tenure Months'] >= 70]['CLTV'].median()) + '\n')
     plot_funcs.append(lambda ax: histogram('Distribution of Churned Customers CLTV', 'CLTV', df_churn, 'CLTV', 20, ax=ax))
 
@@ -240,6 +234,17 @@ def bin_df(df, show=False):
     KeyError
         If required columns for binning are missing.
     """
+
+    def safe_max(series, default):
+        """Helper: Return max if numeric and not nan; else default."""
+        try:
+            val = series.max()
+            if pd.isna(val) or val <= 0:
+                return default
+            return val
+        except Exception:
+            return default
+
     if show:
         plots_count = 3
         cols = 3
@@ -247,9 +252,24 @@ def bin_df(df, show=False):
 
         fig, axs = plt.subplots(rows, cols, figsize=(cols * 6, rows * 5))
         axs = np.atleast_1d(axs).flatten()
-    
+
     else:
         axs = [None, None, None]
+
+    tenure_max = safe_max(df['Tenure Months'], 60)
+    cltv_max = safe_max(df['CLTV'], 6000)
+
+    tenure_bins = [0, 12, 30, 50]
+    if tenure_max > tenure_bins[-1]:
+        tenure_bins.append(tenure_max)
+    else:
+        pass
+
+    cltv_bins = [0, 3000, 4000, 5000]
+    if cltv_max > cltv_bins[-1]:
+        cltv_bins.append(cltv_max)
+    else:
+        pass
 
     df = bin_and_plot('Distribution of Customers Grouped by Tenure Group', 'Tenure Group', df, 'Tenure Months', 'Tenure Group',
                       [0, 12, 30, 50, df['Tenure Months'].max()],
@@ -328,7 +348,7 @@ def get_model(df):
     """
     _ ,model_results, best_model, X_train, X_test, y_test = comparative_models(
         df, 'Churn Value',{'KNeighbors': KNeighborsClassifier(), 'RandomForest': RandomForestClassifier(),'GaussianNB': GaussianNB()},
-        ['State', 'City', 'Zip Code', 'Latitude', 'Longitude', 'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason',
+        ['State', 'Zip Code', 'Latitude', 'Longitude', 'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason',
          'Churn Probability', 'Customer Value', 'Tenure Months', 'Total Charges'], 'recall')
     
     return model_results, best_model, X_train, X_test, y_test
@@ -515,6 +535,9 @@ def predict_df(df, threshold=0.5):
     ValueError
         If threshold is outside valid range [0,1].
     """
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("Threshold must be between 0 and 1.")
+    
     predicted_df = predict_churn(df, threshold)
 
     return predicted_df
@@ -544,3 +567,81 @@ def abc_test_assignment(df):
     data = abc_test(df)
 
     return data
+
+
+def features_to_dataframe(City: Optional[str] = None, Gender: Optional[str] = None, Senior_Citizen: Optional[str] = None,
+                          Partner: Optional[str] = None, Dependents: Optional[str] = None, Tenure_Months: Optional[int] = None,
+                          Phone_Service: Optional[str] = None, Multiple_Lines: Optional[str] = None,
+                          Internet_Service: Optional[str] = None, Online_Security: Optional[str] = None,
+                          Online_Backup: Optional[str] = None, Device_Protection: Optional[str] = None,
+                          Tech_Support: Optional[str] = None, Streaming_TV: Optional[str] = None,
+                          Streaming_Movies: Optional[str] = None, Contract: Optional[str] = None,
+                          Paperless_Billing: Optional[str] = None, Payment_Method: Optional[str] = None,
+                          Monthly_Charges: Optional[float] = None, Total_Charges: Optional[float] = None):
+    """
+    Construct a single-row pandas DataFrame representing customer features.
+
+    Missing feature values are automatically filled using statistical defaults
+    (mode or median) derived from the Telco Customer Churn dataset.
+
+    Parameters
+    ----------
+    City : str, optional
+        Customer city.
+    Gender : str, optional
+        Customer gender.
+    Senior_Citizen : str, optional
+        Whether the customer is a senior citizen.
+    Partner : str, optional
+        Whether the customer has a partner.
+    Dependents : str, optional
+        Whether the customer has dependents.
+    Tenure_Months : int, optional
+        Number of months the customer has been with the company.
+    Phone_Service : str, optional
+        Whether the customer has phone service.
+    Multiple_Lines : str, optional
+        Whether the customer has multiple phone lines.
+    Internet_Service : str, optional
+        Type of internet service.
+    Online_Security : str, optional
+        Whether the customer has online security service.
+    Online_Backup : str, optional
+        Whether the customer has online backup service.
+    Device_Protection : str, optional
+        Whether the customer has device protection service.
+    Tech_Support : str, optional
+        Whether the customer has tech support service.
+    Streaming_TV : str, optional
+        Whether the customer streams TV.
+    Streaming_Movies : str, optional
+        Whether the customer streams movies.
+    Contract : str, optional
+        Customer contract type.
+    Paperless_Billing : str, optional
+        Whether the customer uses paperless billing.
+    Payment_Method : str, optional
+        Customer payment method.
+    Monthly_Charges : float, optional
+        Monthly charges for the customer.
+    Total_Charges : float, optional
+        Total charges for the customer.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame with a single row containing the customer features, with
+        missing values filled using dataset statistics.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the Telco dataset file is not found during default value retrieval.
+    RuntimeError
+        If an error occurs during feature inference or DataFrame construction.
+    """
+    df = features_to_df(City, Gender, Senior_Citizen, Partner, Dependents, Tenure_Months, Phone_Service, Multiple_Lines,
+                        Internet_Service, Online_Security, Online_Backup, Device_Protection, Tech_Support, Streaming_TV,
+                        Streaming_Movies, Contract, Paperless_Billing, Payment_Method, Monthly_Charges, Total_Charges)
+
+    return df

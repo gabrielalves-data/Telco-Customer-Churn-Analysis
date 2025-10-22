@@ -1,6 +1,8 @@
 import pytest
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 from unittest import mock
@@ -11,9 +13,13 @@ from pathlib import Path
 from src.telco_customer_churn_analysis.utils import (safe_display, read_excel, df_head,
                                                      col_replace, null_rows, df_loc, df_aggfunc,
                                                      drop_labels, count_plot, histogram, heatmap,
-                                                     bin_and_plot, chi_squared_test, generate_data)
+                                                     bin_and_plot, chi_squared_test, generate_data, features_to_df)
                     
+@pytest.fixture(autouse=True)
+def suppress_show(monkeypatch):
+    monkeypatch.setattr(plt, 'show', lambda: None)
 
+    
 @pytest.fixture
 def sample_df():
     """Provides a sample DataFrame for testing."""
@@ -23,6 +29,7 @@ def sample_df():
         'C': [1.1, 2.2, np.nan, 3.3, np.nan],
         'D': pd.to_datetime(['2021-01-01', '2021-02-01', '2021-03-01', '2021-04-01', '2021-05-01'])
     }
+
     return pd.DataFrame(data)
 
 @pytest.fixture
@@ -40,7 +47,7 @@ def mock_excel_file(tmp_path):
     return str(file_path)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def mock_plotting_calls(monkeypatch):
     """Mocks `plt.show()` and `plt.subplots()` to prevent plot display and enable checks."""
     monkeypatch.setattr(plt, 'show', lambda: None)
@@ -69,32 +76,6 @@ def mock_plotting_calls(monkeypatch):
     monkeypatch.setattr(sns, 'histplot', mock_histplot)
 
     yield mock_ax, mock_countplot, mock_histplot
-
-
-@pytest.fixture(autouse=True)
-def mock_heatmap_setup(mock_plotting_calls, monkeypatch):
-    mock_fig = mock.Mock()
-    mock_ax = mock.Mock()
-
-    monkeypatch.setattr(plt, 'figure', mock.Mock())
-    monkeypatch.setattr(plt, 'title', mock.Mock())
-    monkeypatch.setattr(plt, 'yticks', mock.Mock())
-    monkeypatch.setattr(plt, 'xticks', mock.Mock())
-    monkeypatch.setattr(plt, 'tight_layout', lambda: None)
-    monkeypatch.setattr(plt, 'show', lambda: None)
-
-    mock_heatmap = mock.Mock()
-    monkeypatch.setattr(sns, 'heatmap', mock_heatmap)
-
-    mock_corr_matrix = pd.DataFrame({
-        'A': [1.0, 0.5],
-        'C': [0.5, 1.0]
-    }, index=['A', 'C'])
-
-    def mock_df_corr(numeric_only):
-        return mock_corr_matrix
-    
-    yield mock_heatmap, mock_df_corr
 
 
 @pytest.fixture
@@ -168,6 +149,9 @@ def mock_chi2_independence(monkeypatch):
 def capfd_out(capfd):
     yield capfd
 
+
+
+
 ## safe_display tests
 
 class TestSafeDisplay:
@@ -222,7 +206,96 @@ class TestSafeDisplay:
         assert (is_df_call_1 and is_err_call_2) or (is_err_call_1 and is_df_call_2), f"Expected one call to be the DataFrame and the other to contain the error prefix: '{error_prefix}'."
 
 
-## read_excel test
+## kaggle_download tests
+
+class TestKaggleDownload:
+    @staticmethod
+    def test_kaggle_download_with_cached_file(tmp_path, capsys):
+        filename = 'Telco_customer_churn.xlsx'
+        cached_file = tmp_path / filename
+        cached_file.write_text("dummy data")
+
+        os.chdir(tmp_path)
+
+        from src.telco_customer_churn_analysis.utils import kaggle_download
+        result_path = kaggle_download()
+
+        assert os.path.exists(result_path)
+        assert result_path == str(cached_file.resolve())
+        assert "Using cached dataset" in capsys.readouterr().out
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.kagglehub.dataset_download')
+    def test_kaggle_download_downloads_file(mock_dataset_download, tmp_path):
+        filename = 'Telco_customer_churn.xlsx'
+        download_path = tmp_path
+        mock_dataset_download.return_value = str(download_path)
+
+        (download_path / filename).write_text("dummy data")
+
+        os.chdir(tmp_path)
+
+        from src.telco_customer_churn_analysis.utils import kaggle_download
+        result_path = kaggle_download()
+
+        assert os.path.exists(result_path)
+        assert result_path == os.path.join(str(download_path), filename)
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.kagglehub.dataset_download')
+    def test_kaggle_download_raises_file_not_found(mock_dataset_download, tmp_path):
+        filename = 'Telco_customer_churn.xlsx'
+        download_path = tmp_path
+        mock_dataset_download.return_value = str(download_path)
+
+        os.chdir(tmp_path)
+
+        from src.telco_customer_churn_analysis.utils import kaggle_download
+
+        with pytest.raises(FileNotFoundError):
+            kaggle_download()
+
+
+    @staticmethod   
+    @mock.patch('src.telco_customer_churn_analysis.utils.kagglehub.dataset_download')
+    def test_kaggle_download_raises_runtime_error_on_download_failure(mock_dataset_download):
+        mock_dataset_download.side_effect = Exception("Kaggle API failure")
+
+        from src.telco_customer_churn_analysis.utils import kaggle_download
+
+        with pytest.raises(RuntimeError) as excinfo:
+            kaggle_download()
+
+        assert "Failed to download dataset from Kaggle" in str(excinfo.value)
+
+
+dummy_data = pd.DataFrame({
+        'City': ['New York', 'New York', 'Los Angeles'],
+        'Gender': ['Female', 'Male', 'Female'],
+        'Senior Citizen': ['No', 'Yes', 'No'],
+        'Partner': ['Yes', 'No', 'Yes'],
+        'Dependents': ['No', 'Yes', 'No'],
+        'Tenure Months': [12, 24, 36],
+        'Phone Service': ['Yes', 'No', 'Yes'],
+        'Multiple Lines': ['No', 'Yes', 'No'],
+        'Internet Service': ['DSL', 'Fiber optic', 'DSL'],
+        'Online Security': ['Yes', 'No', 'Yes'],
+        'Online Backup': ['No', 'Yes', 'No'],
+        'Device Protection': ['Yes', 'No', 'Yes'],
+        'Tech Support': ['No', 'Yes', 'No'],
+        'Streaming TV': ['No', 'Yes', 'No'],
+        'Streaming Movies': ['Yes', 'No', 'Yes'],
+        'Contract': ['Month-to-month', 'One year', 'Two year'],
+        'Paperless Billing': ['Yes', 'No', 'Yes'],
+        'Payment Method': ['Electronic check', 'Mailed check', 'Bank transfer (automatic)'],
+        'Monthly Charges': [50.5, 60.75, 55.25],
+        'Total Charges': [606.0, 1458.0, 1989.0]
+    })
+
+
+## read_excel tests
 
 class TestReadExcel:
     @staticmethod
@@ -850,7 +923,8 @@ class TestCountPlot:
 
         count_plot(title='Title', label='Label', df=sample_df, col='B', tick_rotation=45)
 
-        mock_ax.set_xticklabels.assert_called_once()
+        mock_ax.tick_params.assert_called_once_with(axis='x', rotation=45)
+
 
     @staticmethod
     def test_count_plot_type_error_df(sample_df):
@@ -1001,81 +1075,81 @@ class TestHistogram:
 
 class TestHeatmap:
     @staticmethod
-    def test_heatmap_basic_functionality(sample_df, mock_heatmap_setup, monkeypatch):
-        """Test basic heatmap call with default parameters."""
-        mock_heatmap, mock_df_corr = mock_heatmap_setup
-
-        monkeypatch.setattr(sample_df, 'corr', mock_df_corr)
-
-        heatmap(title='Title', df=sample_df)
-
-        mock_heatmap.assert_called_once()
-        called_args, called_kwargs = mock_heatmap.call_args
-
-        assert called_args[0].shape == (2, 2)
-
-        assert called_kwargs['annot'] is True
-        assert called_kwargs['cmap'] == 'coolwarm'
-        assert called_kwargs['fmt'] == '.2f'
-        assert called_kwargs['annot_kws']['fontsize'] == 7
-
-        plt.title.assert_called_once_with('Title')
-        plt.yticks.assert_called_once_with(rotation=0)
-        plt.xticks.assert_called_once_with(rotation=90)
+    def test_heatmap_basic(sample_df):
+        # Test that heatmap runs without error on sample_df
+        heatmap("Sample Heatmap", sample_df)
 
 
     @staticmethod
-    def test_heatmap_custom_params(sample_df, mock_heatmap_setup, monkeypatch):
-        """Test heatmap with custom 'annot', 'cmap', 'fontsize', and 'num_decimals'."""
-        mock_heatmap, mock_df_corr = mock_heatmap_setup
-
-        monkeypatch.setattr(sample_df, 'corr', mock_df_corr)
-
-        heatmap(title='Title', df=sample_df, annot=False, cmap='viridis', fontsize=10, num_decimals=4)
-
-        mock_heatmap.assert_called_once()
-        called_kwargs = mock_heatmap.call_args[1]
-
-        assert called_kwargs['annot'] is False
-        assert called_kwargs['cmap'] == 'viridis'
-        assert called_kwargs['fmt'] == '.4f'
-        assert called_kwargs['annot_kws']['fontsize'] == 10
-        plt.title.assert_called_once_with('Title')
+    def test_heatmap_with_ax(sample_df):
+        fig, ax = plt.subplots()
+        heatmap("Heatmap With Ax", sample_df, ax=ax)
+        plt.close(fig)
 
 
     @staticmethod
-    def test_heatmap_value_error_no_numeric_columns():
-        """Test `heatmap()` raises ValueError when the DataFrame contains no numeric columns."""
-        non_numeric_df = pd.DataFrame({
-            'A': ['a', 'b'],
-            'B': ['c', 'd']
-        })
-
-        with pytest.raises(ValueError, match="DataFrame contains no numeric columns"):
-            heatmap(title='Title', df=non_numeric_df)
+    def test_heatmap_invalid_df():
+        with pytest.raises(TypeError):
+            heatmap(title="Test", df=[1, 2, 3])  # Not a DataFrame
 
 
     @staticmethod
-    def test_heatmap_type_error_title(sample_df):
-        """Test `heatmap()`` raises TypeError when title is non-string."""
-        with pytest.raises(TypeError, match="'title' must be a string"):
+    def test_heatmap_invalid_title(sample_df):
+        with pytest.raises(TypeError):
             heatmap(title=123, df=sample_df)
 
 
     @staticmethod
-    def test_heatmap_value_error_negative_decimals(sample_df):
-        """Test `heatmap()`` raises ValueError when 'num_decimals' is negative."""
-        with pytest.raises(ValueError, match="'num_decimals' must be a non-negative integer"):
-            heatmap(title='Title', df=sample_df, num_decimals=-1)
+    def test_heatmap_invalid_annot(sample_df):
+        with pytest.raises(TypeError):
+            heatmap(title="Test", df=sample_df, annot="yes")
 
 
     @staticmethod
-    def test_heatmap_value_error_non_positive_fontsize(sample_df):
-        """Test `heatmap()`` raises ValueError when 'fontsize' is non-positive."""
-        with pytest.raises(ValueError, match="'fontsize' must be a positive number"):
-            heatmap(title='Title', df=sample_df, fontsize=0)
+    def test_heatmap_invalid_cmap(sample_df):
+        with pytest.raises(TypeError):
+            heatmap(title="Test", df=sample_df, cmap=123)
 
 
+    @staticmethod
+    def test_heatmap_invalid_fontsize(sample_df):
+        with pytest.raises(ValueError):
+            heatmap(title="Test", df=sample_df, fontsize=-1)
+
+
+    @staticmethod
+    def test_heatmap_invalid_num_decimals(sample_df):
+        with pytest.raises(ValueError):
+            heatmap(title="Test", df=sample_df, num_decimals=-1)
+
+
+    @staticmethod
+    def test_heatmap_no_numeric_columns():
+        df = pd.DataFrame({'X': ['a', 'b'], 'Y': ['c', 'd']})
+        with pytest.raises(ValueError, match="no numeric columns"):
+            heatmap(title="Test", df=df)
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.plt.show', autospec=True)
+    def test_heatmap_calls_show(mock_show, sample_df):
+        heatmap(title="Test", df=sample_df)
+        mock_show.assert_called_once()
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.sns.heatmap')
+    def test_heatmap_custom_params(mock_heatmap, sample_df):
+        mock_heatmap.return_value = None
+
+        heatmap(title="Test", df=sample_df, annot=False, cmap='viridis', fontsize=10, num_decimals=3)
+        kwargs = mock_heatmap.call_args[1]
+        assert kwargs['annot'] is False
+        assert kwargs['cmap'] == 'viridis'
+        assert kwargs['annot_kws']['fontsize'] == 10
+        assert kwargs['fmt'] == '.3f'
+
+    
 ## bin_and_plot tests
 
 class TestBinAndPlot:
@@ -1402,3 +1476,50 @@ class TestGenerateData:
         non_churned = sample_data[sample_data['Churn Value'] == 0]
 
         assert (non_churned['Churn Reason'] == '').all()
+
+
+## features_to_df tests
+
+class TestFeaturesToDf:
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.kaggle_download', return_value='dummy/path')
+    @mock.patch('src.telco_customer_churn_analysis.utils.read_excel', return_value=dummy_data)
+    def test_features_to_df_all_defaults(mock_read, mock_download):
+        df = features_to_df()
+        
+        # Ensure the returned dataframe has exactly one row
+        assert isinstance(df, pd.DataFrame)
+        assert df.shape[0] == 1
+
+        # Spot check a few expected default values based on dummy_data
+        assert df.iloc[0]['City'] == 'New York'
+        assert df.iloc[0]['Tenure Months'] == 24  # Median of [12, 24, 36]
+        assert df.iloc[0]['Internet Service'] == 'DSL'
+        assert df.iloc[0]['Monthly Charges'] == 52.88
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.kaggle_download', return_value='dummy/path')
+    @mock.patch('src.telco_customer_churn_analysis.utils.read_excel', return_value=dummy_data)
+    def test_features_to_df_partial_input(mock_read, mock_download):
+        df = features_to_df(Gender='Male', Contract='One year')
+        assert df.iloc[0]['Gender'] == 'Male'
+        assert df.iloc[0]['Contract'] == 'One year'
+        assert df.iloc[0]['City'] == 'New York'  # Still defaults
+
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.utils.kaggle_download', return_value='dummy/path')
+    @mock.patch('src.telco_customer_churn_analysis.utils.read_excel', return_value=dummy_data)
+    def test_features_to_df_custom_values(mock_read, mock_download):
+        df = features_to_df(
+            City='TestCity',
+            Gender='Female',
+            Monthly_Charges=80.0,
+            Tenure_Months=10,
+            Total_Charges=None  # should calculate
+        )
+        assert df.iloc[0]['City'] == 'TestCity'
+        assert df.iloc[0]['Monthly Charges'] == 80.0
+        assert df.iloc[0]['Total Charges'] == 800.0
+

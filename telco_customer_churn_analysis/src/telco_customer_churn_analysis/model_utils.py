@@ -106,7 +106,7 @@ def preprocess_data(df: pd.DataFrame, target: str,
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
 
-        one_hot_cols = [col for col in X.columns if X[col].nunique() <= 5 and X[col].dtype in ['object', 'category', 'bool']]
+        one_hot_cols = [col for col in X.columns if (X[col].nunique() <= 5 and X[col].dtype in ['object', 'category', 'bool']) or col == 'City']
 
         numeric_cols = X.select_dtypes(include=['int64', 'float64']).columns
 
@@ -861,6 +861,9 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
             preprocessor_unfitted = clone(model.named_steps['preprocessor'])
             X = df.drop(columns=[target] + cols_to_drop_list, errors='ignore')
             y = df[target]
+
+            preprocessor_unfitted.fit(X)
+            
             X_train, X_test, y_test = None, None, None
 
         else:

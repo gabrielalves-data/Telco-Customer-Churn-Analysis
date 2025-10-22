@@ -1,6 +1,8 @@
 import pytest
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from unittest import mock
 from sklearn.pipeline import Pipeline
@@ -23,7 +25,11 @@ except ImportError:
 
 from src.telco_customer_churn_analysis.model_xai import (model_global_explainer, model_local_explainer)
 
+@pytest.fixture(autouse=True)
+def suppress_show(monkeypatch):
+    monkeypatch.setattr(plt, 'show', lambda: None)
 
+    
 @pytest.fixture
 def sample_df():
     """Provides a sample DataFrame for X_train/X_testwith mixed types."""

@@ -8,6 +8,8 @@ import pingouin
 import warnings
 import numpy as np
 import random
+import os
+import kagglehub
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 
 ## Data Wrangling Functions
@@ -50,6 +52,52 @@ def safe_display(data: Any) -> Any:
     return data
 
 
+def kaggle_download():
+    """
+    Downloads the Telco Customer Churn dataset from Kaggle or uses a cached file if available.
+
+    This function checks if the dataset file 'Telco_customer_churn.xlsx' exists locally.
+    If it does, the local cached file path is returned. Otherwise, it downloads the dataset
+    from Kaggle using the `kagglehub.dataset_download` method and returns the full path to the file.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    str
+        The full file path to the Telco Customer Churn Excel dataset.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the dataset file is not found locally and cannot be found after download.
+    RuntimeError
+        If the Kaggle download fails or returns an invalid path.
+    """
+    filename = 'Telco_customer_churn.xlsx'
+
+    if os.path.exists(filename):
+        full_path = os.path.abspath(filename)
+        print(f'Using cached dataset at: {full_path}')
+
+        return full_path
+
+    try:
+        path = kagglehub.dataset_download("yeanzc/telco-customer-churn-ibm-dataset")
+    
+    except Exception as e:
+        raise RuntimeError(f"Failed to download dataset from Kaggle: {e}")
+    
+    full_path = os.path.join(path, filename)
+
+    if not os.path.exists(full_path):
+        raise FileNotFoundError(f"Dataset was not found after download at path: {full_path}")
+    
+    return full_path
+
+
 def read_excel(path: str, date_cols: Optional[List[str]] = None) -> pd.DataFrame:
     """
     Reads a single Excel file into a pandas DataFrame.
@@ -82,10 +130,10 @@ def read_excel(path: str, date_cols: Optional[List[str]] = None) -> pd.DataFrame
 
     try:
         if date_cols is not None:
-            df = pd.read_excel(path, parse_dates=date_cols)
+            df = pd.read_excel(path, parse_dates=date_cols, engine='openpyxl')
 
         else:
-            df = pd.read_excel(path)
+            df = pd.read_excel(path, engine='openpyxl')
 
 
         if df.empty:
@@ -538,8 +586,11 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
     Creates, labels, and displays a seaborn count plot with bar labels.
 
     This function is a wrapper around seaborn.countplot, customizing the plot
-    with a title, axis labels, value labels (counts) centered in the bars,
-    and handling tick rotation. It relies on matplotlib (plt) and seaborn (sns).
+    with a title, axis labels, value labels (counts), and handling tick rotation.
+    Bar labels are centered with white font by default; however, if there are more
+    than 10 bars, the labels switch to black font, are positioned at the edge of
+    the bars, and use a smaller font size for better visibility.
+    It relies on matplotlib (plt) and seaborn (sns).
 
     Parameters
     ----------
@@ -628,16 +679,21 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
 
         if axis == 'x':
             ax.set_xlabel(label)
-            ax.tick_params(axis='x', labelrotation=tick_rotation)
+            ax.tick_params(axis='x', rotation=tick_rotation)
             ax.set_ylabel('Count')
 
         else:
             ax.set_ylabel(label)
-            ax.tick_params(axis='y', labelrotation=tick_rotation)
+            ax.tick_params(axis='y', rotation=tick_rotation)
             ax.set_xlabel('Count')
 
         for container in ax.containers:
-          ax.bar_label(container, fmt='%.0f', label_type='center', color='white', fontsize=10)
+            n_bars = len(container.patches)
+            if n_bars > 10:
+                ax.bar_label(container, fmt='%.0f', label_type='edge', color='black', fontsize=6)
+
+            else:
+                ax.bar_label(container, fmt='%.0f', label_type='center', color='white', fontsize=10)
 
         ax.set_title(title)
 
@@ -818,11 +874,13 @@ def heatmap(title: str, df: pd.DataFrame, annot: bool = True, cmap: str = 'coolw
             raise ValueError(f"ValueError: DataFrame contains no numeric columns to calculate a correlation matrix.")
         
         fmt_str = f'.{num_decimals}f'
+        created_ax = False
 
         if ax is None:
             n_cols = corr_matrix.shape[0]
             fig_size = max(6, n_cols / 2)
             fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+            created_ax = True
 
         sns.heatmap(corr_matrix, annot=annot, cmap=cmap, fmt=fmt_str,
                     annot_kws={'fontsize': fontsize}, cbar=True, linewidth=0.5, linecolor='black', ax=ax)
@@ -831,7 +889,7 @@ def heatmap(title: str, df: pd.DataFrame, annot: bool = True, cmap: str = 'coolw
         ax.tick_params(axis='y', rotation=0)
         ax.tick_params(axis='x', rotation=90)
 
-        if ax is None:
+        if created_ax:
             plt.tight_layout()
             plt.show()
 
@@ -1221,3 +1279,114 @@ def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
     data = data[final_order]
 
     return data
+
+
+def features_to_df(City: Optional[str] = None, Gender: Optional[str] = None, Senior_Citizen: Optional[str] = None, Partner: Optional[str] = None, Dependents: Optional[str] = None,
+                   Tenure_Months: Optional[int] = None, Phone_Service: Optional[str] = None, Multiple_Lines: Optional[str] = None, Internet_Service: Optional[str] = None,
+                   Online_Security: Optional[str] = None, Online_Backup: Optional[str] = None, Device_Protection: Optional[str] = None, Tech_Support: Optional[str] = None,
+                   Streaming_TV: Optional[str] = None, Streaming_Movies: Optional[str] = None, Contract: Optional[str] = None, Paperless_Billing: Optional[str] = None,
+                   Payment_Method: Optional[str] = None, Monthly_Charges: Optional[float] = None, Total_Charges: Optional[float] = None):
+    """
+    Constructs a single-row DataFrame using input customer features, filling in missing values
+    based on statistical defaults (mode or median) from the Telco Customer Churn dataset.
+
+    Parameters
+    ----------
+    All inputs are optional and correspond to customer features:
+
+    City : str, optional
+    Gender : str, optional
+    Senior_Citizen : str, optional
+    Partner : str, optional
+    Dependents : str, optional
+    Tenure_Months : int, optional
+    Phone_Service : str, optional
+    Multiple_Lines : str, optional
+    Internet_Service : str, optional
+    Online_Security : str, optional
+    Online_Backup : str, optional
+    Device_Protection : str, optional
+    Tech_Support : str, optional
+    Streaming_TV : str, optional
+    Streaming_Movies : str, optional
+    Contract : str, optional
+    Paperless_Billing : str, optional
+    Payment_Method : str, optional
+    Monthly_Charges : float, optional
+    Total_Charges : float, optional
+
+    Returns
+    -------
+    pandas.DataFrame
+        A single-row DataFrame containing customer features, with missing values filled.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the Telco dataset file cannot be found or loaded.
+    RuntimeError
+        If there's an unexpected error during feature inference or DataFrame construction.
+    """
+    
+    path = kaggle_download()
+    df = read_excel(path)
+
+    try:
+        def get_mode(column, condition=None):
+            if condition is not None:
+                subset = df[condition]
+                mode_val = subset[column].mode() if not subset.empty else df[column].mode()
+            else:
+                mode_val = df[column].mode()
+            return mode_val.iloc[0] if not mode_val.empty else None
+
+        # Fills
+        City = City or get_mode('City')
+        Gender = Gender or get_mode('Gender')
+        Senior_Citizen = Senior_Citizen or get_mode('Senior Citizen')
+        Partner = Partner or get_mode('Partner')
+        Dependents = Dependents or get_mode('Dependents')
+        Tenure_Months = Tenure_Months or int(df['Tenure Months'].median())
+        Phone_Service = Phone_Service or get_mode('Phone Service')
+        Multiple_Lines = Multiple_Lines or get_mode('Multiple Lines', df['Phone Service'] == Phone_Service)
+        Internet_Service = Internet_Service or get_mode('Internet Service')
+
+        # Dependent on Internet_Service
+        Online_Security = Online_Security or get_mode('Online Security', df['Internet Service'] == Internet_Service)
+        Online_Backup = Online_Backup or get_mode('Online Backup', df['Internet Service'] == Internet_Service)
+        Device_Protection = Device_Protection or get_mode('Device Protection', df['Internet Service'] == Internet_Service)
+        Tech_Support = Tech_Support or get_mode('Tech Support', df['Internet Service'] == Internet_Service)
+        Streaming_TV = Streaming_TV or get_mode('Streaming TV', df['Internet Service'] == Internet_Service)
+        Streaming_Movies = Streaming_Movies or get_mode('Streaming Movies', df['Internet Service'] == Internet_Service)
+
+        Contract = Contract or get_mode('Contract')
+        Paperless_Billing = Paperless_Billing or get_mode('Paperless Billing')
+        Payment_Method = Payment_Method or get_mode('Payment Method')
+        Monthly_Charges = Monthly_Charges or round(df[df['Internet Service'] == Internet_Service]['Monthly Charges'].median(), 2)
+        Total_Charges = Total_Charges or round(Monthly_Charges * Tenure_Months, 2)
+
+        return pd.DataFrame([{
+            'City': City,
+            'Gender': Gender,
+            'Senior Citizen': Senior_Citizen,
+            'Partner': Partner,
+            'Dependents': Dependents,
+            'Tenure Months': Tenure_Months,
+            'Phone Service': Phone_Service,
+            'Multiple Lines': Multiple_Lines,
+            'Internet Service': Internet_Service,
+            'Online Security': Online_Security,
+            'Online Backup': Online_Backup,
+            'Device Protection': Device_Protection,
+            'Tech Support': Tech_Support,
+            'Streaming TV': Streaming_TV,
+            'Streaming Movies': Streaming_Movies,
+            'Contract': Contract,
+            'Paperless Billing': Paperless_Billing,
+            'Payment Method': Payment_Method,
+            'Monthly Charges': Monthly_Charges,
+            'Total Charges': Total_Charges
+        }])
+
+    except Exception as e:
+        raise RuntimeError("An error occurred while constructing the customer feature DataFrame.") from e
