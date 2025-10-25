@@ -688,7 +688,11 @@ def count_plot(title: str, label: str, df: pd.DataFrame, col: str, axis: Literal
             ax.set_xlabel('Count')
 
         for container in ax.containers:
-            n_bars = len(container.patches)
+            try:
+                n_bars = len(getattr(container, 'patches', []))
+            except TypeError:
+                n_bars = 0
+                
             if n_bars > 10:
                 ax.bar_label(container, fmt='%.0f', label_type='edge', color='black', fontsize=6)
 
@@ -908,67 +912,64 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
                  palette: Optional[Union[str, List[str], Dict[str, str]]] = None,
                  tick_rotation: Union[int, float] = 0, show_plot: bool = True, ax: Optional[matplotlib.axes._axes.Axes] = None) -> pd.DataFrame:
     """
-    Bins a numerical column and optionally generates a count plot of the binned data.
+    Bin a numerical column and optionally generate a count plot of the binned data.
 
-    This function first uses pandas.cut to discretize a numerical column into
-    specified bins and returns a new DataFrame with the binned column added.
-    It then optionally calls the `count_plot` function to visualize the distribution.
+    Uses `pandas.cut` to discretize a numeric column into specified bins and adds
+    a new binned column to the DataFrame. Optionally, generates a count plot using
+    the `count_plot` function.
 
     Parameters
     ----------
     title : str
-        The title of the count plot.
+        Title of the count plot.
     label : str
-        The label for the data axis (x-axis if axis='x', y-axis if axis='y').
+        Label for the data axis (x-axis if axis='x', y-axis if axis='y').
     df : pandas.DataFrame
-        The DataFrame containing the data.
+        The DataFrame containing the column to bin.
     col : str
-        The name of the numerical column to be binned.
+        Name of the numerical column to bin.
     new_col : str
-        The name for the new binned column.
-    bins : int, list of (int/float), or pandas.IntervalIndex
-        The criteria for binning.
+        Name for the new binned column.
+    bins : int, list of numbers, or pandas.IntervalIndex
+        Bin edges or number of bins for discretization.
     labels : list of str, optional
-        The labels for the returned bins. If provided, they will also be used
-        as the order for the count plot, overriding `order`.
+        Labels for the returned bins. If provided, also used as the order for plotting.
     right : bool, optional
-        Indicates whether the bins include the rightmost edge. Defaults to True.
+        Whether bins include the rightmost edge. Default True.
     include_lowest : bool, optional
-        Indicates whether the first bin should include the lower bound. Defaults to True.
+        Whether the first interval should include the lowest value. Default True.
     axis : {'x', 'y'}, optional
-        The orientation of the plot ('x' for vertical bars, 'y' for horizontal bars).
-        Defaults to 'x'.
+        Orientation of plot bars ('x' for vertical, 'y' for horizontal). Default 'x'.
     hue : str, optional
-        The name of the column for color encoding (grouping). Defaults to None.
-    order : list of (str, float, or int), optional
-        **Deprecated/Overridden.** The desired order of the categories (binned labels)
-        on the count axis. Note: If `labels` is provided, it will be used as the order.
+        Column name for color grouping in the plot.
+    order : list, optional
+        Desired order of categories on the count axis. Ignored if `labels` is provided.
     palette : str, list, or dict, optional
-        The color palette to use for the count plot. Defaults to None.
+        Color palette for the plot.
     tick_rotation : int or float, optional
-        The rotation angle for axis ticks. Defaults to 0.
+        Rotation of axis tick labels. Default 0.
     show_plot : bool, optional
-        If True, the count plot is generated and displayed. Defaults to True.
+        Whether to generate and display the plot. Default True.
     ax : matplotlib.axes.Axes, optional
-        An optional matplotlib Axes object to plot into. If None, a new plot is created internally.
+        Axes to plot into. If None, a new figure/axes is created.
 
     Returns
     -------
-    pandas.DataFrame
-        Returns a copy of the original DataFrame with the new binned column added.
-        If `show_plot` is True, returns the matplotlib Axes object of the plot.
-        
+    pd.DataFrame or matplotlib.axes.Axes
+        - If `show_plot` is False, returns a copy of the DataFrame with the binned column added.
+        - If `show_plot` is True and plotting succeeds, returns the Matplotlib Axes object.
+        - If plotting fails or the `count_plot` function is unavailable, returns the DataFrame with the binned column added.
+
     Raises
     ------
     TypeError
-        If input arguments (like `df`, `title`, `col`, `new_col`, `hue`, `bins`, `labels`)
-        are not of the correct type.
+        If input arguments are of incorrect type.
     KeyError
-        If `col` or `hue` (if provided) is not found in the DataFrame columns.
+        If `col` or `hue` (if provided) is not found in the DataFrame.
     ValueError
         If binning configuration is invalid (e.g., non-numeric column, mismatched bins/labels).
     RuntimeError
-        For unexpected issues during binning or plotting.
+        If unexpected issues occur during binning or plotting.
     """
 
     if not isinstance(df, pd.DataFrame):
@@ -993,7 +994,7 @@ def bin_and_plot(title: str, label: str, df: pd.DataFrame, col: str, new_col: st
 
     try:
         df_new.loc[:, new_col] = pd.cut(df_new[col], bins=bins, labels=labels, right=right,
-                                        include_lowest=include_lowest)
+                                        include_lowest=include_lowest, duplicates='drop')
 
         if labels is not None:
           plot_order = labels
@@ -1164,8 +1165,6 @@ def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
     3. Contract and Billing terms.
     4. Service dependencies (e.g., Multiple Lines requires Phone Service; Add-ons require Internet Service).
     5. Tenure and financial charges, where Total Charges are dependent on Monthly Charges and Tenure.
-    6. The target variable ('Churn Value') is simulated with higher probability
-       for 'Month-to-month' contracts and low tenure, mimicking real-world leakage.
 
     Parameters
     ----------
@@ -1176,7 +1175,7 @@ def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
     Returns
     -------
     pandas.DataFrame: A DataFrame containing the synthetic customer data with
-                      33 columns in a predefined order, suitable for immediate
+                      28 columns in a predefined order, suitable for immediate
                       preprocessing and model training.
     """
 
@@ -1243,26 +1242,6 @@ def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
 
     churn_prob_base = np.where(data['Contract'] == 'Month-to-month', 0.45, 0.10)
     churn_prob_adjusted = np.where(data['Tenure Months'] <= 5, churn_prob_base * 1.5, churn_prob_base)
-    data['Churn Value'] = (np.random.rand(N_RECORDS) < churn_prob_adjusted.clip(max=1.0)).astype(int)
-
-    data['Churn Score'] = np.where(
-        data['Churn Value'] == 1,
-        np.random.randint(75, 100, N_RECORDS),
-        np.random.randint(10, 65, N_RECORDS)
-    )
-
-    data['CLTV'] = np.where(
-        (data['Churn Value'] == 0) & (data['Contract'] == 'Two year'),
-        np.random.randint(4500, 7500, N_RECORDS),
-        np.random.randint(1500, 4500, N_RECORDS)
-    )
-
-    churn_reasons = ['Competitor', 'Service Quality', 'Pricing', 'Moved', 'Other']
-    data['Churn Reason'] = np.where(
-        data['Churn Value'] == 1,
-        np.random.choice(churn_reasons, N_RECORDS),
-        ''
-    )
 
     data = pd.DataFrame(data)
 
@@ -1272,8 +1251,7 @@ def generate_data(n_records: int = 10000, seed: int = 123) -> pd.DataFrame:
         'Dependents', 'Tenure Months', 'Phone Service', 'Multiple Lines',
         'Internet Service', 'Online Security', 'Online Backup', 'Device Protection',
         'Tech Support', 'Streaming TV', 'Streaming Movies', 'Contract',
-        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges',
-        'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason'
+        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges'
     ]
 
     data = data[final_order]

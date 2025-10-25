@@ -13,6 +13,7 @@ from itertools import product
 from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from typing import Union, Dict, List, Any, Optional, Tuple
 import joblib
+import os
 
 from .utils import (safe_display)
 
@@ -27,10 +28,9 @@ def preprocess_data(df: pd.DataFrame, target: str,
     for preprocessing.
 
     Preprocessing Logic:
-    - One-Hot Encoding ('one_hot'): Applied to categorical/object columns with 5 or fewer unique values.
+    - One-Hot Encoding ('one_hot'): Applied to categorical/object columns with 5 or fewer unique values, including 'City'.
     - Standard Scaling ('scaler'): Applied to numerical columns (int64/float64) with more than 5 unique values.
-    - Remainder ('passthrough'): All other columns (including high-cardinality categoricals and
-      low-cardinality numerics) are passed through unchanged.
+    - Remainder ('passthrough'): All other columns (including high-cardinality categoricals and low-cardinality numerics) are passed through unchanged.
 
     Parameters
     ----------
@@ -47,15 +47,15 @@ def preprocess_data(df: pd.DataFrame, target: str,
 
     Returns
     -------
-    tuple: A tuple containing:
+    tuple
         - X (pandas.DataFrame): The full features DataFrame.
         - y (pandas.Series): The full target Series.
         - X_train (pandas.DataFrame): The training features.
         - X_test (pandas.DataFrame): The testing features.
         - y_train (pandas.Series): The training target.
         - y_test (pandas.Series): The testing target.
-        - preprocessor (sklearn.compose.ColumnTransformer): The **unfitted** ColumnTransformer object.
-        - preprocessor_trained (sklearn.compose.ColumnTransformer): The **fitted** ColumnTransformer object (fitted only on X_train).
+        - preprocessor (ColumnTransformer): The **unfitted** ColumnTransformer object.
+        - preprocessor_trained (ColumnTransformer): The **fitted** ColumnTransformer object (fitted only on X_train).
 
     Raises
     ------
@@ -115,7 +115,7 @@ def preprocess_data(df: pd.DataFrame, target: str,
 
         preprocessor = ColumnTransformer(
             transformers=[
-                ('one_hot', OneHotEncoder(handle_unknown='ignore'), one_hot_cols),
+                ('one_hot', OneHotEncoder(handle_unknown='ignore', sparse_output=False), one_hot_cols),
                 ('scaler', StandardScaler(), scaler_cols)
             ],
             remainder='passthrough'
@@ -141,7 +141,7 @@ def model_pipelines(preprocessor: ColumnTransformer, comparative_models: Dict[st
 
     Parameters
     ----------
-    preprocessor : sklearn.compose.ColumnTransformer
+    preprocessor : ColumnTransformer
         The unfitted preprocessor object (ColumnTransformer) to be used as the first step
         in all pipelines.
     comparative_models : dict
@@ -214,6 +214,7 @@ def hyperparameters(models: Dict[str, Pipeline]) -> Dict[str, Dict[str, Union[Pi
     hyperparameter grids suitable for grid search or randomized search.
     Each model's entry includes the pipeline object and a 'params' dictionary
     with parameter names correctly prefixed by 'classifier__'.
+    Pipelines without a predefined hyperparameter grid are skipped with a warning.
 
     Parameters
     ----------
@@ -226,8 +227,7 @@ def hyperparameters(models: Dict[str, Pipeline]) -> Dict[str, Dict[str, Union[Pi
     dict
         A dictionary where keys are model names and values are dictionaries
         containing the pipeline object ('model') and a corresponding
-        hyperparameter grid ('params'). Models without a defined grid will be
-        omitted, and a message will be printed.
+        hyperparameter grid ('params').
 
     Raises
     ------
@@ -311,47 +311,47 @@ def train_evaluate_model(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: p
                          params: Dict[str, Dict[str, Union[Pipeline, Dict[str, List[Any]]]]],
                          metric: str = 'f1', cv: int = 5) -> Tuple[Dict[str, Pipeline], List[Dict[str, Any]]]:
     """
-    Trains and evaluates multiple machine learning models using GridSearchCV.
+    Train and evaluate multiple machine learning models with hyperparameter tuning.
 
-    This function iterates through a dictionary of models and their hyperparameter
-    grids. For each model, it performs a grid search with cross-validation to
-    find the best hyperparameters. It then trains the best estimator, makes
-    predictions on the test set, and calculates and prints various
-    classification metrics (Recall, Precision, F1-Score, Accuracy, and ROC-AUC).
-    It also identifies and stores the top 4 most important features.
+    Iterates through a dictionary of models and their hyperparameter grids, performing
+    GridSearchCV for each. Trains the best estimator, evaluates predictions on the
+    test set, computes standard classification metrics (Recall, Precision, F1, Accuracy,
+    ROC-AUC), and identifies the top 4 most important features where possible.
 
     Parameters
     ----------
-    X_train, X_test : pandas.DataFrame
-        The training and testing feature sets.
-    y_train, y_test : pandas.Series
-        The training and testing target variables.
+    X_train : pd.DataFrame
+        Training features.
+    X_test : pd.DataFrame
+        Test features.
+    y_train : pd.Series
+        Training target.
+    y_test : pd.Series
+        Test target.
     params : dict
-        A dictionary containing model pipelines and their corresponding
-        hyperparameter grids, typically generated by the `hyperparameters` function.
-    metric : str, optional
-        The scoring metric to use for GridSearchCV. Defaults to 'f1'.
-    cv : int, optional
-        The number of cross-validation folds (k-folds) to use for GridSearchCV.
-        Defaults to 5.
+        Dictionary with model pipelines and hyperparameter grids. Each entry should have
+        keys `'model'` (Pipeline) and `'params'` (dict of hyperparameters).
+    metric : str, default 'f1'
+        Scoring metric used for GridSearchCV.
+    cv : int, default 5
+        Number of cross-validation folds.
 
     Returns
     -------
-    tuple
-        - best_models (dict): A dictionary of the best trained estimator
-          (the final GridSearchCV.best_estimator_) for each model.
-        - model_results (list): A list of dictionaries, where each
-          dictionary contains the evaluation results, best parameters,
-          predictions, and prediction probabilities for a single model.
+    best_models : dict
+        Dictionary of the best trained estimators, keyed by model name.
+    model_results : list
+        List of dictionaries containing evaluation metrics, best parameters, top features,
+        predictions, and probabilities for each model.
 
     Raises
     ------
     TypeError
-        If input types are incorrect.
+        If input data types are incorrect.
     ValueError
-        If input data or parameter structures are invalid.
+        If the `params` dictionary is empty or CV is invalid.
     RuntimeError
-        For unexpected errors during model training or evaluation.
+        For unexpected errors during training or evaluation.
     """
 
     if not all(isinstance(df, (pd.DataFrame, pd.Series)) for df in [X_train, X_test, y_train, y_test]):
@@ -453,41 +453,45 @@ def voting_model(X_train: pd.DataFrame, X_test: pd.DataFrame, y_train: pd.Series
                  best_models: Dict[str, Pipeline], metric: str = 'f1', n_iter: int = 10,
                  cv: int = 5, random_state: int = 123) -> Tuple[Dict[str, VotingClassifier], List[Dict[str, Any]]]:
     """
-    Trains and evaluates a VotingClassifier using a combination of best models.
+    Train and evaluate a soft VotingClassifier ensemble from base models.
 
-    This function creates an ensemble VotingClassifier using a 'soft' voting
-    strategy (aggregating probabilities) from the base models provided. It dynamically
-    constructs a hyperparameter search space for the combined model by generating a
-    set of discrete weight combinations (using `itertools.product` internally) and then uses
-    RandomizedSearchCV to sample from these combinations to find the optimal set of
-    base model weights. Finally, it evaluates and prints the performance metrics of the best
-    VotingClassifier on the test set.
+    Constructs a VotingClassifier with the provided best models, performs RandomizedSearchCV
+    over possible weight combinations to find optimal base model weights, and evaluates
+    performance on the test set using standard metrics (Accuracy, Recall, Precision, F1, ROC-AUC).
 
     Parameters
     ----------
-    X_train (pandas.DataFrame): The training feature set.
-    X_test (pandas.DataFrame): The testing feature set.
-    y_train (pandas.Series): The training target variable.
-    y_test (pandas.Series): The testing target variable.
-    best_models (dict): A dictionary of best-performing trained models,
-        typically from a previous grid search. Keys are model names, values are Pipeline objects.
-    metric (str, optional): The scoring metric to use for RandomizedSearchCV.
-        Defaults to 'f1'.
-    n_iter (int, optional): The number of parameter settings that are sampled
-        during RandomizedSearchCV. Defaults to 10.
-    cv (int, optional): The number of cross-validation folds (k-folds)
-        to use for RandomizedSearchCV. Defaults to 5.
-    random_state (int, optional): The seed for the random number generator
-        for reproducibility. Defaults to 123.
+    X_train : pd.DataFrame
+        Training features.
+    X_test : pd.DataFrame
+        Test features.
+    y_train : pd.Series
+        Training target.
+    y_test : pd.Series
+        Test target.
+    best_models : dict
+        Dictionary of trained base models (Pipeline objects) to include in the ensemble.
+    metric : str, default 'f1'
+        Scoring metric used for RandomizedSearchCV.
+    n_iter : int, default 10
+        Number of weight combinations sampled in RandomizedSearchCV.
+    cv : int, default 5
+        Number of cross-validation folds.
+    random_state : int, default 123
+        Random seed for reproducibility.
 
     Returns
     -------
-    tuple
-        - best_voting_model (dict): A dictionary containing the best trained
-          VotingClassifier object under the key 'VotingClassifier'.
-        - vot_model_results (list): A list containing a dictionary of the
-          evaluation results (including accuracy, recall, precision, F1, AUC,
-          best parameters), predictions, and prediction probabilities for the VotingClassifier.
+    best_voting_model : dict
+        Dictionary containing the trained VotingClassifier under the key 'VotingClassifier'.
+    vot_model_results : list
+        List with a single dictionary containing evaluation metrics, best parameters,
+        predictions, and prediction probabilities for the VotingClassifier.
+
+    Notes
+    -----
+    If one or more base models do not support `predict_proba`, the VotingClassifier
+    may fall back to 'hard' voting automatically.
     """
 
     if not isinstance(best_models, dict) or not best_models:
@@ -570,50 +574,57 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
                        cols_to_drop: Union[str, List[str], None] = None, metric: str = 'f1',
                        test_size: float = 0.2, random_state: int = 123) -> Tuple[Dict[str, Pipeline], pd.DataFrame, Pipeline, pd.DataFrame, pd.DataFrame, pd.Series]:
     """
-    Orchestrates a comprehensive machine learning workflow to train, evaluate, and compare
-    multiple classification models, including a final voting ensemble.
+    Orchestrate training, evaluation, and comparison of multiple classification models.
 
-    The process includes data preprocessing, baseline model establishment via cross-validation,
-    hyperparameter tuning via grid search, and final evaluation of individual and
-    ensemble models. The best model, based on the specified metric, is then identified
-    and its details are printed. The function prints the baseline score, comparative
-    model results, voting model results, and a summary table.
-
-    NOTE: This function relies on several external helper functions (preprocess_data,
-    model_pipelines, hyperparameters, train_evaluate_model, voting_model) which must
-    be imported or defined in the execution environment.
+    Performs a complete workflow including:
+    - Data preprocessing
+    - Baseline Logistic Regression cross-validation
+    - Hyperparameter tuning of multiple comparative models
+    - Model evaluation and ranking
+    - Construction of a VotingClassifier ensemble
+    - Identification of the best model based on a specified metric
 
     Parameters
     ----------
-    df (pandas.DataFrame): The input DataFrame.
-    target (str): The name of the target variable column.
-    comparative_models (dict): A dictionary of scikit-learn classifier objects
-        to compare against Logistic Regression.
-    cols_to_drop (str or list, optional): Additional columns to drop from the
-        features. Defaults to None.
-    metric (str, optional): The scoring metric for model evaluation (used in GridSearchCV
-        and for final sorting). Defaults to 'f1'.
-    test_size (float, optional): The proportion of the dataset to include in the
-        test split. Defaults to 0.2.
-    random_state (int, optional): The seed for reproducibility. Defaults to 123.
+    df : pd.DataFrame
+        Input dataset.
+    target : str
+        Name of the target variable column.
+    comparative_models : dict
+        Dictionary of scikit-learn classifier objects to compare against Logistic Regression.
+    cols_to_drop : str or list, optional
+        Columns to exclude from features. Defaults to None.
+    metric : str, default 'f1'
+        Metric for evaluating models and sorting results.
+    test_size : float, default 0.2
+        Fraction of data reserved for testing.
+    random_state : int, default 123
+        Seed for reproducibility.
 
     Returns
     -------
-    tuple
-        - all_models (dict): A dictionary containing all best-performing trained
-          models (from GridSearch/RandomizedSearch), including the final VotingClassifier ensemble.
-        - all_results (pandas.DataFrame): A DataFrame summarizing the evaluation
-          metrics and best parameters for all trained models, sorted by the specified metric.
-        - model_object_by_metric (sklearn.pipeline.Pipeline): The single best-performing
-          trained Pipeline object, determined by the specified `metric`.
-        - X_train (pandas.DataFrame): The training features used for model fitting.
-        - X_test (pandas.DataFrame): The testing features used for final evaluation.
-        - y_test (pandas.Series): The testing target variable.
+    all_models : dict
+        Dictionary of best trained models, including the final VotingClassifier.
+    all_results : pd.DataFrame
+        DataFrame summarizing metrics, best parameters, and top features for all models.
+    model_object_by_metric : Pipeline
+        Best-performing model based on the specified metric.
+    X_train : pd.DataFrame
+        Training features used.
+    X_test : pd.DataFrame
+        Testing features used.
+    y_test : pd.Series
+        Test target variable.
 
     Raises
     ------
     ValueError, TypeError, RuntimeError
-        For various issues during the workflow.
+        If issues occur during preprocessing, training, evaluation, or saving models.
+
+    Notes
+    -----
+    This function relies on external helper functions: `preprocess_data`, `model_pipelines`,
+    `hyperparameters`, `train_evaluate_model`, and `voting_model`.
     """
 
     all_models = {}
@@ -625,6 +636,25 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     best_model_name = 'N/A'
 
     try:
+        if os.path.exists('model_results.pkl'):
+            print("Loading model... (skipping training)")
+            saved_data = joblib.load('model_results.pkl')
+
+            all_models = saved_data['all_models']
+            all_results = saved_data['all_results']
+            model_object_by_metric = saved_data['model_untrained']
+            X_train = saved_data['X_train']
+            X_test = saved_data['X_test']
+            y_test = saved_data['y_test']
+
+            print('\n\n--- Model Results ---')
+            print(all_results[['name', 'recall', 'precision', 'accuracy', 'f1', 'roc_auc']])
+
+            print(f"\n\n--- Best Model: {all_results['name'].iloc[0]} ---\n\n")
+
+            return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
+        
+        print('Start training models ...')
         X, y, X_train, X_test, y_train, y_test, preprocessor, preprocessor_trained = preprocess_data(df, target, cols_to_drop, test_size, random_state)
 
         models = model_pipelines(preprocessor, comparative_models, random_state)
@@ -636,6 +666,7 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
         print('-' * 100)
 
         print('\n','-' * 50,'Comparative Models Results','-' * 50,'\n')
+        print('Dtypes,', X_train.dtypes, X_train.dtypes, y_test.dtypes)
         best_models, model_results = train_evaluate_model(X_train, X_test, y_train, y_test, params, metric)
 
         best_voting_model, vot_model_results = voting_model(X_train, X_test, y_train, y_test, best_models,
@@ -691,11 +722,25 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
 
     except NotImplementedError as e:
         print(f"Execution failed: A required helper function is missing: {e}.")
-        return {}, pd.DataFrame(), None, pd.DataFrame(), pd.DataFrame(), pd.Series(dtype='int')
+        all_models = {}
+        all_results = pd.DataFrame()
+        model_object_by_metric = None
+        X_train = pd.DataFrame()
+        X_test = pd.DataFrame()
+        y_test = pd.Series(dtype='int')
+
+        return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
 
     except Exception as e:
         print(f"An unexpected error occurred during the workflow: {type(e).__name__} - {e}.")
-        return {}, pd.DataFrame(), None, pd.DataFrame(), pd.DataFrame(), pd.Series(dtype='int')
+        all_models = {}
+        all_results = pd.DataFrame()
+        model_object_by_metric = None
+        X_train = pd.DataFrame()
+        X_test = pd.DataFrame()
+        y_test = pd.Series(dtype='int')
+        
+        return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
     
 
 ## MLOPS, Optimization and Business Action Functions
@@ -704,48 +749,42 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
 def profit_curve(model_df: pd.DataFrame, median_value: float, cost: float, retention_rate: float,
                  labels: Union[np.ndarray, pd.Series]):
     """
-    Calculates the optimal prediction threshold and maximum expected profit
+    Computes the optimal probability threshold and maximum expected profit
     for a classification model using a cost-sensitive profit evaluation.
 
-    This function assumes the model's predicted probabilities for the positive class
-    have already been computed and are stored in the 'predictions_proba' column of
-    the first row of the input DataFrame.
+    Assumes the predicted probabilities for the positive class are stored
+    in the 'predictions_proba' column of the first row of the input DataFrame.
 
-    Financial logic:
-    - True Positive (TP): (LTV * retention rate) - cost of intervention
-    - False Positive (FP): - cost (intervention wasted on non-churner)
-    - False Negative (FN): - LTV (lost value due to missed churn)
-    - True Negative (TN): 0 (correct non-intervention)
+    Profit calculation logic:
+    - True Positive (TP): (median_value * retention_rate) - cost
+    - False Positive (FP): - cost
+    - False Negative (FN): - median_value
+    - True Negative (TN): 0
 
     Parameters
     ----------
     model_df : pandas.DataFrame
-        DataFrame (typically from comparative_models) with a 'predictions_proba'
-        column in the first row containing an array of predicted probabilities.
-
+        DataFrame with a 'predictions_proba' column containing predicted probabilities
+        for the positive class in its first row.
     median_value : float
-        Median customer lifetime value (CLTV), used to calculate opportunity cost.
-
+        Median customer lifetime value (CLTV) for estimating opportunity cost.
     cost : float
-        Cost of applying an intervention (e.g., retention offer).
-
+        Cost of an intervention (e.g., retention offer).
     retention_rate : float
-        Likelihood that an intervention will successfully retain the customer.
-
+        Probability that an intervention successfully prevents churn.
     labels : array-like
-        Ground truth target labels (0 or 1) for the test set.
+        Ground truth target labels (0 or 1).
 
     Returns
     -------
     best_threshold : float
-        Threshold that yields the maximum expected profit.
-
+        Probability threshold that maximizes expected profit.
     best_profit : float
-        Maximum profit achievable with the optimal threshold.
-
+        Maximum achievable profit at the optimal threshold.
     profit_values : dict
-        Dictionary mapping thresholds to calculated profits.
+        Mapping of thresholds to calculated profits, sorted descending.
     """
+
     if not isinstance(model_df, pd.DataFrame):
         raise TypeError("'model_df' must be a pandas DataFrame.")
     
@@ -814,35 +853,44 @@ def profit_curve(model_df: pd.DataFrame, median_value: float, cost: float, reten
 def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
                      cols_to_drop: Optional[Union[str, List[str]]]) -> Pipeline:
     """
-    Retrains the final, best-performing model on the entire dataset (X + y) and saves
-    the complete, fitted scikit-learn Pipeline for deployment.
+    Retrains the final, best-performing model on the entire dataset (X + y)
+    and saves the fully fitted scikit-learn Pipeline for deployment.
 
-    This function executes the final step of the MLOps process by maximizing the
-    information available to the model. It constructs a new Pipeline using the
-    unfitted preprocessor and the tuned classifier, then fits this entire
-    structure to all data (training and test combined). The final fitted Pipeline
-    is saved to a .pkl file for production use.
+    Constructs a new Pipeline with the unfitted preprocessor and classifier
+    and fits it to all available data. Saves the trained Pipeline to
+    'deployment_pipeline.pkl'.
 
     Parameters
     ----------
-    df (pandas.DataFrame): The full, raw input DataFrame (contains X and y).
-    model (sklearn.pipeline.Pipeline): The best-performing, fitted Pipeline object
-                                       from the model comparison stage.
-    target (str): The name of the target variable column.
-    cols_to_drop (str or list, optional): Additional columns to drop from the
-                                          features before retraining.
+    df : pandas.DataFrame
+        Full raw dataset containing features and target.
+    model : sklearn.pipeline.Pipeline
+        Best-performing, fitted Pipeline from model comparison stage.
+    target : str
+        Name of the target variable column.
+    cols_to_drop : str or list, optional
+        Columns to drop from features before retraining.
 
     Returns
     -------
-    sklearn.pipeline.Pipeline: The final, fitted Pipeline object, ready for
-                               making predictions on new, raw data.
+    sklearn.pipeline.Pipeline
+        Fully fitted Pipeline ready for deployment.
 
     Side Effects
     ------------
-    - Saves the fitted Pipeline object to a file named 'deployment_pipeline.pkl'
-      using joblib.
+    Saves the fitted Pipeline to 'deployment_pipeline.pkl'.
     """
 
+    if os.path.exists("deployment_pipeline.pkl"):
+        print("Deployment model already exists - loading existing pipeline (skipping retraining and deployment).")
+        try:
+            existing_pipeline = joblib.load("deployment_pipeline.pkl")
+
+            return existing_pipeline
+        
+        except Exception as e:
+            print(f"Warning: Could not load existing deployment pipeline ({e}), retraining and deploying.")
+    
     if cols_to_drop is None:
         cols_to_drop_list: List[str] = []
 
@@ -880,9 +928,9 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
         ('classifier', classifier_unfitted)
     ])
 
-    print('Retraining Final Model on The Entire Dataset...')
+    print('Start retraining of final model on full dataset...')
     deployment_pipeline.fit(X, y)
-    print('Retraining Complete.')
+    print('Retraining complete.')
 
     try:
         joblib.dump(deployment_pipeline,'deployment_pipeline.pkl')
@@ -896,35 +944,30 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
 
 def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = 'deployment_pipeline.pkl') -> pd.DataFrame:
     """
-    Loads the fitted deployment pipeline, predicts the churn probability for a
-    dataset, flags customers for intervention, and filters the final target list.
+    Predicts churn probabilities using a deployed model, flags high-risk customers,
+    and returns a ranked list for intervention.
 
-    This function is designed to be the production step, taking raw customer data
-    and returning a ranked list of high-risk customers who meet specific business
-    criteria (Contract type).
+    Loads a fitted deployment pipeline, calculates probabilities, applies
+    the optimal threshold, and adds an intervention flag.
 
     Parameters
     ----------
-    df (pandas.DataFrame): The raw, unprocessed input customer data to score.
-    threshold (float): The optimal churn probability threshold (e.g., 0.650)
-                       determined by the Profit Curve analysis, above which
-                       customers are flagged for intervention.
-    model_path (str, optional): The file path to the saved, fitted deployment
-                                pipeline (a scikit-learn Pipeline object saved
-                                with joblib). Defaults to 'deployment_pipeline.pkl'.
+    df : pandas.DataFrame
+        Raw customer data to score.
+    threshold : float
+        Probability threshold for flagging customers (from Profit Curve).
+    model_path : str, optional
+        Path to the saved deployment pipeline. Defaults to 'deployment_pipeline.pkl'.
 
     Returns
     -------
-    pandas.DataFrame: A DataFrame containing only the customers who meet both
-                      the model's high-risk criteria (Probability >= threshold)
-                      and the business segment criteria (Contract == 'Month-to-month').
-                      The DataFrame is sorted by 'Churn Probability' in descending
-                      order, prioritizing the highest-risk customers.
+    pandas.DataFrame
+        DataFrame containing all customers with predicted churn probability and
+        intervention flag. Sorted by 'Churn Probability' descending.
 
     Side Effects
     ------------
-    - Prints a message if the model file is not found.
-    - Prints the count of customers identified for intervention.
+    Prints messages if the model cannot be loaded or if prediction fails.
     """
 
     loaded_model: Optional[Pipeline] = None
@@ -952,30 +995,25 @@ def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = 'deploym
     df_scored['Churn Probability'] = proba
     df_scored['Intervention Flag'] = (proba >= threshold).astype(int)
 
-    test_target = df_scored[(df_scored['Intervention Flag'] == 1) & (df_scored['Contract'] == 'Month-to-month')].copy()
-
-    print(f'Identified {len(test_target)} customers for A/B/C intervention test.')
-
-    return test_target.sort_values(by='Churn Probability', ascending=False)
+    return df_scored.sort_values(by='Churn Probability', ascending=False)
 
 
-def abc_test(high_risk_target: pd.DataFrame, random_seed: int = 123) -> pd.DataFrame:
+def abc_test(predicted_df: pd.DataFrame, random_seed: int = 123) -> pd.DataFrame:
     """
     Randomly assigns a pre-filtered population of high-risk customers into
     three groups (A/Control, B/Price Offer, C/Service Offer) for an intervention test.
 
     This function is typically run after a predictive model has identified and
-    filtered the final, actionable customer segment (e.g., customers with a
-    high probability of churn AND a 'Month-to-month' contract). The assignment
+    filtered the actionable customer segment (e.g., customers with high
+    probability of churn AND a 'Month-to-month' contract). The assignment
     is balanced and randomized using the provided seed.
 
     Parameters
     ----------
-    high_risk_target : pandas.DataFrame
-        The DataFrame containing the final, pre-filtered set of customers to be
+    predicted_df : pandas.DataFrame
+        DataFrame containing the final, pre-filtered set of customers to be
         targeted for the A/B/C test. An empty DataFrame will result in an
         early return with a message.
-
     random_seed : int, default=123
         Seed for the NumPy random number generator to ensure reproducible
         assignment of customers to test groups.
@@ -983,27 +1021,27 @@ def abc_test(high_risk_target: pd.DataFrame, random_seed: int = 123) -> pd.DataF
     Returns
     -------
     pandas.DataFrame
-        The input DataFrame augmented with two new columns:
-        - **'Group'**: The randomized test group assignment, e.g., 'A (Control)'.
-        - **'Intervention Details'**: A specific description of the offer
-          associated with the group ('10% Off 1-Year Contract', '6 Months Free Tech Support',
+        Input DataFrame augmented with two new columns:
+        - **'Group'**: Randomized test group assignment (e.g., 'A (Control)').
+        - **'Intervention Details'**: Description of the offer associated with
+          the group ('10% Off 1-Year Contract', '6 Months Free Tech Support',
           or 'None (Control)').
 
     Notes
     -----
-    - The randomization uses ``numpy.random.choice`` with replacement, but since
-      the sample size is the total population size, this effectively performs a
-      simple random sample without replacement *if* all groups are present.
-      The sample is intended to be a simple random assignment into the three
-      categories (A, B, C).
+    - Randomization uses ``numpy.random.choice`` with replacement, but since
+      the sample size equals the total population, it effectively performs
+      a simple random assignment without replacement.
     - A summary table of the assignment count per group is printed to the console.
     """
 
-    if high_risk_target.empty:
+    if predicted_df.empty:
         print('Dataframe empty. No customers assign to test groups.')
         return pd.DataFrame()
 
-    target_population = high_risk_target.copy()
+    target_population = predicted_df[(predicted_df['Intervention Flag'] == 1) & (predicted_df['Contract'] == 'Month-to-month')].copy()
+
+    print(f'Identified {len(target_population)} customers for A/B/C intervention test.')
     n = len(target_population)
 
     if n == 0:

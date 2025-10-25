@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>EDA Results</title>
+    <style>
+        .plot-container {
+            margin: 30px auto;
+            max-width: 1800px;
+            text-align: center;
+        }
+        img {
+            width: 100%;
+            max-width: 1500px;
+            border: 1px solid #ccc;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        .back-button {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            text-decoration: none;
+            font-size: 16px;
+            color: #333;
+            border: 1px solid #ccc;
+            padding: 8px 12px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            transition: background-color 0.3s ease;
+        }
+        .back-button:hover {
+            background-color: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
+        &#x1F3E0;
+    </a>
+    <h1 style="text-align:center;">Exploratory Data Analysis Results</h1>
+
+    <pre style="max-width: 1200px; margin: 20px auto; background: #f4f4f4; padding: 15px; border-radius: 8px; overflow-x: auto;">
+{{ preprocessing_text }}
+    </pre>
+
+    <h2 style="text-align: center; margin-top: 40p;">EDA Summary Visualizations</h2>
+
+    {% for filename in images %}
+    <div class="plot-container">
+        <img src="{{ url_for('static', filename='eda/' + filename) }}" alt="EDA Plot {{ loop.index }}" />
+    </div>
+    {% endfor %}
+</body>
+</html>

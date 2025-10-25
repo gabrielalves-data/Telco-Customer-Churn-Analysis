@@ -94,7 +94,8 @@ def exploratory_analysis(df):
     Returns
     -------
     pandas.DataFrame
-        The input DataFrame potentially modified with additional binned columns.
+        The input DataFrame with additional binned columns:
+        'Tenure Group', 'Churn Probability', and 'Customer Value'.
 
     Raises
     ------
@@ -296,17 +297,102 @@ def bin_df(df, show=False):
     return df
 
 
-def hypothesis_test(df):
+def bin_df_2(df: pd.DataFrame, show: bool = False):
     """
-    Perform chi-squared hypothesis test on 'Contract' vs 'Churn Value'.
+    Bin the 'Tenure Months' column into categorical groups and optionally display a plot.
 
-    This function runs a chi-squared test to examine the independence
-    between contract types and churn outcomes.
+    This function bins the 'Tenure Months' column into customer tenure groups:
+    'New Customer', 'New/Established Customer', 'Established/Veteran Customer', and 'Veteran Customer'.
+    If `show=True`, it generates a count plot for the binned column.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        The DataFrame containing binned Telco customer data.
+        The DataFrame containing the 'Tenure Months' column.
+    show : bool, optional
+        If True, generates and displays a count plot for the binned column. Default is False.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The DataFrame with a new column 'Tenure Group' added.
+
+    Raises
+    ------
+    KeyError
+        If the 'Tenure Months' column is missing from the DataFrame.
+    """
+
+    def safe_max(series: pd.Series, default: int):
+        """Helper: Return max if numeric and not nan; else default."""
+        try:
+            val = series.max()
+            if pd.isna(val) or val <= 0:
+                return default
+            return val
+        except Exception:
+            return default
+        
+    def create_bins(series: pd.Series, base_bins, labels):
+        series_max = safe_max(series, base_bins[-1])
+        bins = base_bins.copy()
+        if series_max > bins[-1]:
+            bins.append(series_max + 1)
+        bins = sorted(set(bins))
+        lbls = labels[:len(bins) - 1]
+
+        return bins, lbls
+
+    if show:
+        plots_count = 3
+        cols = 3
+        rows = (plots_count + cols - 1) // cols
+
+        fig, axs = plt.subplots(rows, cols, figsize=(cols * 6, rows * 5))
+        axs = np.atleast_1d(axs).flatten()
+
+    else:
+        axs = [None, None, None]
+
+    df['Tenure Months'] = pd.to_numeric(df['Tenure Months'], errors='coerce')
+    tenure_bins, tenure_labels = create_bins(
+        df['Tenure Months'],
+        base_bins=[0, 12, 30, 50],
+        labels = ['New Customer', 'New/Established Customer', 'Established/Veteran Customer', 'Veteran Customer']
+    )
+
+    df = bin_and_plot('Distribution of Customers Grouped by Tenure Group', 'Tenure Group', df, 'Tenure Months', 'Tenure Group',
+                      tenure_bins,
+                      tenure_labels,
+                      show_plot=show, ax=axs[0] if show else None)
+    
+    if show is True:
+        for ax in axs:
+            ax.title.set_fontsize(9)
+            ax.tick_params(axis='x', labelsize=6)
+        
+        plt.tight_layout()
+        plt.show()
+
+    return df
+
+
+def hypothesis_test(data_choice: str = 'Test', col1: str = None, col2: str = None):
+    """
+    Perform a chi-squared test of independence between two columns.
+
+    Depending on `data_choice`, this function uses either preprocessed test data
+    or newly generated synthetic data. It bins the data before running the chi-squared test.
+
+    Parameters
+    ----------
+    data_choice : str, default='Test'
+        - 'Test': Use preprocessed test dataset.
+        - 'New': Use new synthetic dataset.
+    col1 : str, optional
+        First column to test. Defaults to first relevant column.
+    col2 : str, optional
+        Second column to test. Defaults to second relevant column.
 
     Returns
     -------
@@ -315,9 +401,43 @@ def hypothesis_test(df):
     Raises
     ------
     KeyError
-        If required columns are missing from the DataFrame.
+        If the selected columns are missing from the DataFrame.
+    ValueError
+        If `data_choice` is invalid or DataFrame has insufficient columns.
     """
-    _ , _ , _ = chi_squared_test(df, 'Contract', 'Churn Value')
+    if data_choice == 'Test':
+        print('Use test data')
+        df = data_preprocessing()
+        df = bin_df(df)
+
+    elif data_choice == 'New':
+        print('Use new data')
+        df = generate_test_data()
+        df = bin_df_2(df)
+
+    else:
+        raise ValueError('Input invalid. Please select "Test" to use the training data or "New" to use new generated data.')
+
+    columns = df.columns.to_list()
+
+    try:
+        if col1 is None or col1 not in columns:
+            if len(df.columns) >= 1:
+                col1 = df.columns[0]
+            else:
+                raise ValueError("DataFrame has no columns.")
+        
+        if col2 is None or col2 not in columns:
+            if len(df.columns) >= 2:
+                col2 = df.columns[1]
+            else:
+                raise ValueError('DataFrame has less than 2 columns.')
+    
+    except ValueError as e:
+        raise ValueError(f"Please select an dataframe column.")
+    
+    _ , _ , _ = chi_squared_test(df, col1, col2)
+    
 
 def get_model(df):
     """
@@ -335,23 +455,25 @@ def get_model(df):
     Returns
     -------
     tuple
-        - model_results (dict): Dictionary containing evaluation results for models.
+        - all_models (dict): Dictionary of trained models.
+        - all_results (dict): Evaluation metrics for each model.
         - best_model (sklearn estimator): The best performing trained model.
-        - X_train (pandas.DataFrame): Training feature set.
-        - X_test (pandas.DataFrame): Testing feature set.
-        - y_test (pandas.Series): Testing target variable.
+        - X_train (pandas.DataFrame): Training features.
+        - X_test (pandas.DataFrame): Testing features.
+        - y_test (pandas.Series): Testing target values.
 
     Raises
     ------
     ValueError
         If the dataset is invalid or model training fails.
     """
-    _ ,model_results, best_model, X_train, X_test, y_test = comparative_models(
+    all_models ,all_results, best_model, X_train, X_test, y_test = comparative_models(
         df, 'Churn Value',{'KNeighbors': KNeighborsClassifier(), 'RandomForest': RandomForestClassifier(),'GaussianNB': GaussianNB()},
         ['State', 'Zip Code', 'Latitude', 'Longitude', 'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason',
          'Churn Probability', 'Customer Value', 'Tenure Months', 'Total Charges'], 'recall')
     
-    return model_results, best_model, X_train, X_test, y_test
+    return all_models, all_results, best_model, X_train, X_test, y_test
+
     
 def global_explainer(model, X_train, X_test):
     """
@@ -396,7 +518,7 @@ def local_explainer(model, X_train, X_test, index=None):
     X_test : pandas.DataFrame
         Testing features.
     index : int, optional
-        The index of the test sample to explain. Defaults to 0.
+        The index of the test sample to explain. Defaults to None (first sample if None is handled inside the function).
 
     Returns
     -------
@@ -411,7 +533,7 @@ def local_explainer(model, X_train, X_test, index=None):
     """
     model_local_explainer(model, X_train, X_test, index)
 
-def profit_curve_threshold(df, aggfunc, col, model_df, cost, retention_rate, y_test):
+def profit_curve_threshold(aggfunc, col, model_df, cost, retention_rate, y_test):
     """
     Calculate the optimal profit threshold from the profit curve analysis.
 
@@ -421,8 +543,6 @@ def profit_curve_threshold(df, aggfunc, col, model_df, cost, retention_rate, y_t
 
     Parameters
     ----------
-    df : pandas.DataFrame
-        Dataset containing customer data.
     aggfunc : str
         Aggregation function name to apply on column `col` (e.g., 'median', 'mean').
     col : str
@@ -446,6 +566,8 @@ def profit_curve_threshold(df, aggfunc, col, model_df, cost, retention_rate, y_t
     ValueError
         If inputs are invalid or computation fails.
     """
+    path = kaggle_download()
+    df = read_excel(path)
     median_col = df_aggfunc(df, aggfunc, col)
 
     threshold, profit, _ = profit_curve(model_df, median_col, cost, retention_rate, y_test)
@@ -488,17 +610,13 @@ def generate_test_data():
     """
     Generate synthetic test data for model evaluation and prediction.
 
-    This function creates a synthetic dataset with similar structure to the
-    Telco churn dataset and applies binning on tenure groups.
-
-    Parameters
-    ----------
-    None
+    Creates a synthetic dataset with a structure similar to the Telco churn dataset,
+    and adds a binned 'Tenure Group' feature.
 
     Returns
     -------
     pandas.DataFrame
-        Synthetic test dataset with binned features.
+        Synthetic test dataset including the 'Tenure Group' binned column.
 
     Raises
     ------

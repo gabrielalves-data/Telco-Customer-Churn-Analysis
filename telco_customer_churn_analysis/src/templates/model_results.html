@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Model Training Results</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+        .back-button {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            text-decoration: none;
+            font-size: 16px;
+            color: #333;
+            border: 1px solid #ccc;
+            padding: 8px 12px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            transition: background-color 0.3s ease;
+        }
+        .back-button:hover {
+            background-color: #e0e0e0;
+        }
+    </style>
+</head>
+<body>
+    <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
+        &#x1F3E0;
+    </a>
+    <div class="container">
+        <h2>Model Training and Deployment Results</h2>
+        <pre>{{ result }}</pre>
+    </div>
+</body>
+</html>

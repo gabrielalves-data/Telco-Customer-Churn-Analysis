@@ -17,12 +17,15 @@ from src.telco_customer_churn_analysis.utils import (safe_display, read_excel, d
                     
 @pytest.fixture(autouse=True)
 def suppress_show(monkeypatch):
+    """Automatically suppresses matplotlib `plt.show()` during tests."""
+
     monkeypatch.setattr(plt, 'show', lambda: None)
 
     
 @pytest.fixture
 def sample_df():
     """Provides a sample DataFrame for testing."""
+
     data = {
         'A': [1, 2, np.nan, 4, 5],
         'B': ['x', 'y', 'z', 'x', 'y'],
@@ -35,12 +38,14 @@ def sample_df():
 @pytest.fixture
 def empty_df():
     """Provides an empty DataFrame for testing."""
+
     return pd.DataFrame({'A': [], 'B': [], 'C': [], 'D': []})
 
 
 @pytest.fixture
 def mock_excel_file(tmp_path):
     """Creates a temporary dummy Excel file for testing"""
+
     df = pd.DataFrame({'A': [1, 2], 'B': [3, 4], 'C': ['2021-01-01', '2021-02-01']})
     file_path = tmp_path / "test.xlsx"
     df.to_excel(file_path, index=False)
@@ -50,6 +55,7 @@ def mock_excel_file(tmp_path):
 @pytest.fixture()
 def mock_plotting_calls(monkeypatch):
     """Mocks `plt.show()` and `plt.subplots()` to prevent plot display and enable checks."""
+
     monkeypatch.setattr(plt, 'show', lambda: None)
     monkeypatch.setattr(plt, 'tight_layout', lambda: None)
 
@@ -80,6 +86,8 @@ def mock_plotting_calls(monkeypatch):
 
 @pytest.fixture
 def mock_count_plot_dependency(monkeypatch):
+    """Mocks the `count_plot` function in the utils module for testing dependencies."""
+
     mock_count_plot = mock.Mock()
     import src.telco_customer_churn_analysis.utils as path_count_plot
 
@@ -90,6 +98,8 @@ def mock_count_plot_dependency(monkeypatch):
 
 @pytest.fixture
 def sample_df_chi2():
+    """Provides a sample DataFrame for chi-square test scenarios."""
+
     data = {
         'A': [1, 2, 3, 4, 5] * 10,
         'B': ['x', 'y'] * 25,
@@ -102,6 +112,8 @@ def sample_df_chi2():
 
 @pytest.fixture
 def mock_chi2_independence(monkeypatch):
+    """Mocks `pingouin.chi2_independence` with predefined scenarios for testing."""
+
     ## Scenario 1 (Significant Result - Moderate Association)
     expected_sig = pd.DataFrame({'x': [5.0, 5.0], 'y': [5.0, 5.0]}, index=['P', 'Q'])
     observed_sig = pd.DataFrame({'x': [0, 2], 'y': [2, 8]}, index=['P', 'Q'])
@@ -147,9 +159,9 @@ def mock_chi2_independence(monkeypatch):
 
 @pytest.fixture
 def capfd_out(capfd):
+    """Wrapper for `capfd` fixture to capture stdout/stderr output."""
+
     yield capfd
-
-
 
 
 ## safe_display tests
@@ -451,7 +463,7 @@ class TestColReplace:
 
     @staticmethod
     @mock.patch('builtins.print')
-    def test_col_replace_wars_on_no_occurrence(mock_print, sample_df):
+    def test_col_replace_warns_on_no_occurrence(mock_print, sample_df):
         """Test that `col_replace()` warns when the 'old_var' is not found."""
         col_replace(sample_df, 'B', 'non_existent', 'new_value')
         mock_print.assert_called_once_with("Warning: No occurrence of non_existent found in column 'B'.")
@@ -1076,12 +1088,15 @@ class TestHistogram:
 class TestHeatmap:
     @staticmethod
     def test_heatmap_basic(sample_df):
-        # Test that heatmap runs without error on sample_df
+        """Test basic heatmap generation with default parameters."""
+
         heatmap("Sample Heatmap", sample_df)
 
 
     @staticmethod
     def test_heatmap_with_ax(sample_df):
+        """Test heatmap plotting with a provided matplotlib axis."""
+
         fig, ax = plt.subplots()
         heatmap("Heatmap With Ax", sample_df, ax=ax)
         plt.close(fig)
@@ -1089,42 +1104,56 @@ class TestHeatmap:
 
     @staticmethod
     def test_heatmap_invalid_df():
+        """Test that passing a non-DataFrame raises TypeError."""
+
         with pytest.raises(TypeError):
-            heatmap(title="Test", df=[1, 2, 3])  # Not a DataFrame
+            heatmap(title="Test", df=[1, 2, 3])
 
 
     @staticmethod
     def test_heatmap_invalid_title(sample_df):
+        """Test that a non-string title raises TypeError."""
+
         with pytest.raises(TypeError):
             heatmap(title=123, df=sample_df)
 
 
     @staticmethod
     def test_heatmap_invalid_annot(sample_df):
+        """Test that a non-boolean 'annot' raises TypeError."""
+
         with pytest.raises(TypeError):
             heatmap(title="Test", df=sample_df, annot="yes")
 
 
     @staticmethod
     def test_heatmap_invalid_cmap(sample_df):
+        """Test that an invalid 'cmap' type raises TypeError."""
+
         with pytest.raises(TypeError):
             heatmap(title="Test", df=sample_df, cmap=123)
 
 
     @staticmethod
     def test_heatmap_invalid_fontsize(sample_df):
+        """Test that negative font size raises ValueError."""
+
         with pytest.raises(ValueError):
             heatmap(title="Test", df=sample_df, fontsize=-1)
 
 
     @staticmethod
     def test_heatmap_invalid_num_decimals(sample_df):
+        """Test that negative num_decimals raises ValueError."""
+
         with pytest.raises(ValueError):
             heatmap(title="Test", df=sample_df, num_decimals=-1)
 
 
     @staticmethod
     def test_heatmap_no_numeric_columns():
+        """Test that a DataFrame with no numeric columns raises ValueError."""
+
         df = pd.DataFrame({'X': ['a', 'b'], 'Y': ['c', 'd']})
         with pytest.raises(ValueError, match="no numeric columns"):
             heatmap(title="Test", df=df)
@@ -1133,6 +1162,8 @@ class TestHeatmap:
     @staticmethod
     @mock.patch('src.telco_customer_churn_analysis.utils.plt.show', autospec=True)
     def test_heatmap_calls_show(mock_show, sample_df):
+        """Test that plt.show() is called during heatmap generation."""
+
         heatmap(title="Test", df=sample_df)
         mock_show.assert_called_once()
 
@@ -1140,6 +1171,8 @@ class TestHeatmap:
     @staticmethod
     @mock.patch('src.telco_customer_churn_analysis.utils.sns.heatmap')
     def test_heatmap_custom_params(mock_heatmap, sample_df):
+        """Test that heatmap correctly passes custom annotation, colormap, fontsize, and decimals."""
+        
         mock_heatmap.return_value = None
 
         heatmap(title="Test", df=sample_df, annot=False, cmap='viridis', fontsize=10, num_decimals=3)
@@ -1376,7 +1409,7 @@ class TestGenerateData:
     @staticmethod
     def test_generate_data_output_type_and_shape(sample_data):
         """Test that the output is a DataFrame, has the correct number of columns, and the requested number of rows."""
-        expected_cols = 32
+        expected_cols = 28
         expected_rows = 10
 
         assert isinstance(sample_data, pd.DataFrame)
@@ -1392,8 +1425,7 @@ class TestGenerateData:
         'Dependents', 'Tenure Months', 'Phone Service', 'Multiple Lines',
         'Internet Service', 'Online Security', 'Online Backup', 'Device Protection',
         'Tech Support', 'Streaming TV', 'Streaming Movies', 'Contract',
-        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges',
-        'Churn Value', 'Churn Score', 'CLTV', 'Churn Reason'
+        'Paperless Billing', 'Payment Method', 'Monthly Charges', 'Total Charges'
         ]
 
         assert len(sample_data.columns) == len(expected_order)
@@ -1418,17 +1450,10 @@ class TestGenerateData:
 
 
     @staticmethod
-    def test_generate_data_churn_value_range(sample_data):
-        """Test that 'Churn Value' is stricly binary (0 or 1)."""
-        assert set(sample_data['Churn Value'].unique()).issubset({0, 1})
-
-
-    @staticmethod
     def test_generate_data_charges_non_negative(sample_data):
         """Test that all financial columns are non-negative."""
         assert (sample_data['Monthly Charges'] >= 0).all()
         assert (sample_data['Total Charges'] >= 0).all()
-        assert (sample_data['CLTV'] >= 0).all()
 
 
     @staticmethod
@@ -1468,14 +1493,6 @@ class TestGenerateData:
 
         if not new_customers.empty:
             np.testing.assert_allclose(new_customers['Total Charges'], new_customers['Monthly Charges'], atol=0.01)
-
-
-    @staticmethod
-    def test_generate_data_churn_reason_dependency(sample_data):
-        """Test that 'Churn Reason' is only present (not empty string) for Churned Customers."""
-        non_churned = sample_data[sample_data['Churn Value'] == 0]
-
-        assert (non_churned['Churn Reason'] == '').all()
 
 
 ## features_to_df tests

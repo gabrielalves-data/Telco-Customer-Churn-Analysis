@@ -875,12 +875,13 @@ class TestComparativeModels:
         df['target_col'] = (df['target_col'] > 0.5).astype(int)
         target = 'target_col'
 
-        with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=NotImplementedError("Missing Function")):
-            all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
+        with mock.patch('os.path.exists', return_value=False):
+            with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=NotImplementedError("Missing Function")):
+                all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
 
-            assert all_models == {}
-            assert all_results.empty
-            assert best_model is None
+        assert all_models == {}
+        assert all_results.empty
+        assert best_model is None
 
 
     @staticmethod
@@ -890,12 +891,13 @@ class TestComparativeModels:
         df['target_col'] = (df['target_col'] > 0.5).astype(int)
         target = 'target_col'
 
-        with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=RuntimeError("Something broke")):
-            all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
+        with mock.patch('os.path.exists', return_value=False):
+            with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=RuntimeError("Something broke")):
+                all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
 
-            assert all_models == {}
-            assert all_results.empty
-            assert best_model is None
+        assert all_models == {}
+        assert all_results.empty
+        assert best_model is None
 
 
 ## profit_curve tests
@@ -1097,9 +1099,8 @@ class TestPredictChurn:
 
             assert isinstance(result_df, pd.DataFrame)
             assert not result_df.empty
-            assert all(result_df['Contract'] == 'Month-to-month')
-            assert all(result_df['Churn Probability'] >= 0.5)
-            assert result_df['Churn Probability'].is_monotonic_decreasing
+            assert 'Churn Probability' in result_df.columns
+            assert 'Intervention Flag' in result_df.columns
 
 
     @staticmethod
@@ -1140,9 +1141,10 @@ class TestPredictChurn:
             result = predict_churn(df, threshold=threshold)
 
             assert not result.empty
-            assert all(result['Contract'] == 'Month-to-month')
-            assert all(result['Churn Probability'] >= threshold)
-            assert len(result) == 5
+            assert isinstance(result, pd.DataFrame)
+            assert len(result) == len(df)
+            assert 'Churn Probability' in result.columns
+            assert 'Intervention Flag' in result.columns
 
 
     @staticmethod
@@ -1158,7 +1160,8 @@ class TestPredictChurn:
             result = predict_churn(df, threshold=0.5)
 
             assert isinstance(result, pd.DataFrame)
-            assert result.empty
+            assert 'Churn Probability' in result.columns
+            assert 'Intervention Flag' in result.columns
 
 
 ## abc_test tests

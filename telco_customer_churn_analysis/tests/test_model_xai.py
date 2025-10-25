@@ -27,12 +27,15 @@ from src.telco_customer_churn_analysis.model_xai import (model_global_explainer,
 
 @pytest.fixture(autouse=True)
 def suppress_show(monkeypatch):
+    """Automatically suppress plt.show() during tests to prevent plots from displaying."""
+
     monkeypatch.setattr(plt, 'show', lambda: None)
 
     
 @pytest.fixture
 def sample_df():
-    """Provides a sample DataFrame for X_train/X_testwith mixed types."""
+    """Provides a sample DataFrame for X_train/X_test with mixed types."""
+
     np.random.seed(123)
 
     n_rows = 1100
@@ -47,6 +50,7 @@ def sample_df():
 @pytest.fixture
 def create_mock_pipeline_steps():
     """Return mock preprocessor and classifier objects."""
+
     n_rows = 1100
     n_features = 5
     mock_preprocessor = mock.MagicMock(spec=ColumnTransformer)
@@ -75,6 +79,7 @@ def create_mock_pipeline_steps():
 @pytest.fixture
 def tree_model_pipeline(create_mock_pipeline_steps):
     """Provide a mock Pipeline with Tree-based classifier."""
+
     mock_preprocessor, mock_tree_classifier, _ = create_mock_pipeline_steps
     pipeline = Pipeline(steps=[
         ('preprocessor', mock_preprocessor),
@@ -87,6 +92,7 @@ def tree_model_pipeline(create_mock_pipeline_steps):
 @pytest.fixture
 def linear_model_pipeline(create_mock_pipeline_steps):
     """Provides a mock Pipeline with a non-Tree-based classifier."""
+
     mock_preprocessor, _ , mock_linear_classifier = create_mock_pipeline_steps
     pipeline = Pipeline(steps=[
         ('preprocessor', mock_preprocessor),
@@ -99,6 +105,7 @@ def linear_model_pipeline(create_mock_pipeline_steps):
 @pytest.fixture(autouse=True)
 def mock_external_libs():
     """Mock SHAP and Matplotlib for all tests in this file."""
+
     n_rows = 1100
     n_features = 5
 
@@ -141,6 +148,7 @@ class TestModelGlobalExplainer:
     @staticmethod
     def test_model_global_explainer_raises_value_error_if_not_pipeline(sample_df):
         """Test ValueError when model is not a Pipeline."""
+
         with pytest.raises(ValueError, match="The 'model' must be a sklearn.pipeline.Pipeline object"):
             model_global_explainer(mock.MagicMock(), sample_df, sample_df)
 
@@ -148,6 +156,7 @@ class TestModelGlobalExplainer:
     @staticmethod
     def test_model_global_explainer_raises_value_error_if_missing_steps(sample_df):
         """Test ValueError when required steps are missing."""
+
         bad_pipeline = Pipeline(steps=[('only_step', mock.MagicMock())])
         with pytest.raises(ValueError, match="Pipeline must contain steps named 'preprocessor' and 'classifier'"):
             model_global_explainer(bad_pipeline, sample_df, sample_df)
@@ -156,6 +165,7 @@ class TestModelGlobalExplainer:
     @staticmethod
     def test_model_global_explainer_raises_attribute_error_on_feature_names(tree_model_pipeline, sample_df):
         """Test AttributeError when preprocessor lacks 'get_feature_names_out()'."""
+
         tree_model_pipeline.named_steps['preprocessor'].get_feature_names_out.side_effect = AttributeError()
         with pytest.raises(AttributeError, match="Failed to retrieve feature names"):
             model_global_explainer(tree_model_pipeline, sample_df, sample_df)
@@ -165,6 +175,7 @@ class TestModelGlobalExplainer:
     @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
     def test_model_global_explainer_uses_tree_explainer(mock_shap, tree_model_pipeline, sample_df):
         """Test TreeExplainer path is correctly used for tree-based models."""
+
         mock_tree_explainer = mock_shap.TreeExplainer
         model_global_explainer(tree_model_pipeline, sample_df, sample_df)
 
@@ -177,6 +188,7 @@ class TestModelGlobalExplainer:
     @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
     def test_model_global_explainer_uses_kernel_explainer(mock_shap, linear_model_pipeline, sample_df):
         """Test KernelExplainer path is correctly used for non-tree models."""
+
         mock_kernel_explainer = mock_shap.KernelExplainer
         model_global_explainer(linear_model_pipeline, sample_df, sample_df)
 
@@ -190,6 +202,7 @@ class TestModelGlobalExplainer:
     @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
     def test_model_global_explainer_kernel_explainer_limits_test_set(mock_shap, linear_model_pipeline, sample_df):
         """Test KernelExplainer limits the test set to 1000 samples for performance."""
+
         large_df = pd.concat([sample_df] * 12).reset_index(drop=True)
         model_global_explainer(linear_model_pipeline, sample_df, large_df, random_state=1)
 
@@ -215,6 +228,7 @@ class TestModelLocalExplainer:
     @mock.patch('src.telco_customer_churn_analysis.model_xai.shap.TreeExplainer')
     def test_local_model_explainer_raises_value_error_if_index_out_of_bounds(mock_tree_explainer, tree_model_pipeline, sample_df):
         """Test ValueError when the index is not valid for X_test."""
+
         mock_tree_explainer.return_value = mock.MagicMock()
 
         X_test = sample_df.loc[: 10]
@@ -243,6 +257,7 @@ class TestModelLocalExplainer:
     @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
     def test_model_local_explainer_uses_tree_explainer_and_waterfall(mock_shap, tree_model_pipeline, sample_df):
         """Test TreeExplainer path and correct waterfall plot call."""
+
         mock_tree_explainer = mock_shap.TreeExplainer
         model_local_explainer(tree_model_pipeline, sample_df, sample_df, index=5)
 
@@ -260,6 +275,7 @@ class TestModelLocalExplainer:
     @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
     def test_model_local_explainer_uses_kernel_explainer_and_waterfall(mock_shap, linear_model_pipeline, sample_df):
         """Test KernelExplainer path and correct waterfall plot call."""
+        
         mock_kernel_explainer = mock_shap.KernelExplainer
         model_local_explainer(linear_model_pipeline, sample_df, sample_df, index=5)
 
