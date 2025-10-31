@@ -206,3 +206,10 @@ __marimo__/
 
 # Files
 .pkl
+
+# Elastic Beanstalk local files
+.elasticbeanstalk/*.zip
+.elasticbeanstalk/*.log
+
+# OS junk
+.DS_Store

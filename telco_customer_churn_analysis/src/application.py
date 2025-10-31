@@ -9,8 +9,8 @@ from telco_customer_churn_analysis.src.telco_customer_churn_analysis.telco_custo
 
 load_dotenv()
 
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "flask_key")
+application = Flask(__name__)
+application.secret_key = os.getenv("FLASK_SECRET_KEY", "flask_key")
 
 base_css = """
 <style>
@@ -73,7 +73,7 @@ function showLoading() {
 """
 
 
-@app.route("/")
+@application.route("/")
 def index():
     return render_template_string(base_css + """
     <div id="loading-overlay">
@@ -94,7 +94,7 @@ def index():
     """)
 
 
-@app.route("/eda")
+@application.route("/eda")
 def run_eda():
     try:
         df, preprocessing_text = data_preprocessing_app()
@@ -108,7 +108,7 @@ def run_eda():
         return redirect(url_for("index"))
 
 
-@app.route("/hypothesis_tests", methods=["GET", "POST"])
+@application.route("/hypothesis_tests", methods=["GET", "POST"])
 def run_hypothesis_tests():
     if request.method == "POST":
         data_choice = request.form.get("data_choice")
@@ -171,7 +171,7 @@ def run_hypothesis_tests():
     """)
 
 
-@app.route("/train_evaluate_deploy")
+@application.route("/train_evaluate_deploy")
 def run_train_evaluate_deploy():
     try:
         result_text = train_evaluate_deploy_app()
@@ -218,7 +218,7 @@ def extract_features_from_form(form):
     }
 
 
-@app.route("/predict_best_threshold", methods=["GET", "POST"])
+@application.route("/predict_best_threshold", methods=["GET", "POST"])
 def predict_best_threshold():
     if request.method == "POST":
         features = extract_features_from_form(request.form)
@@ -562,7 +562,7 @@ def predict_best_threshold():
 
 
 
-@app.route("/predict_xai", methods=["GET", "POST"])
+@application.route("/predict_xai", methods=["GET", "POST"])
 def predict_xai():
     if request.method == "POST":
         features = extract_features_from_form(request.form)
@@ -930,4 +930,4 @@ def predict_xai():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    application.run(debug=True)
