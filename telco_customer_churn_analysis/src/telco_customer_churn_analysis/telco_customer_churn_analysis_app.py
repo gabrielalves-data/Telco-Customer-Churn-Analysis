@@ -419,6 +419,7 @@ def train_evaluate_deploy_app():
     with redirect_stdout(output_buffer):
         try:
             all_models, all_results, best_model, X_train, X_test, y_test = get_model(df)
+            print('Model Created')
 
         except Exception as e:
             print(f"Error while loading or training model: {e}")

@@ -159,15 +159,24 @@ def predict_with_best_profit_threshold(df=None, y_test=None, aggfunc: str = 'med
     df = bin_df_app(df)
 
     print('--- User Df ---')
-
-    if y_test is None:
+        
+    try: 
         with open('model_results.pkl', 'rb') as deployed_model:
             bundle = joblib.load(deployed_model)
-        
-        y_test = bundle['y_test']
 
-    with open('model_results.pkl', 'rb') as deployed_model:
-        bundle = joblib.load(deployed_model)
+    except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
+        print(f"Warning: Could not load 'model_results.pkl' ({type(e).__name__} - {e}).")
+        print('Please run `comparative_models` to generate a valid model bundle.')
+            
+        return
+        
+    except Exception as e:
+        print(f"Unexpected error loading 'model_results' ({type(e).__name__} - {e}).")
+            
+        return
+
+    if y_test is None:
+        y_test = bundle['y_test']
     
     model_df = bundle['all_results']
     

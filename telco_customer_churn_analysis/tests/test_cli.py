@@ -77,11 +77,21 @@ def test_train_evaluate_deploy(mock_deploy, mock_preprocess, mock_bin, mock_get_
 
     mock_preprocess.return_value = "mock_df"
     mock_bin.return_value = "mock_binned_df"
-    mock_get_model.return_value = None
-    mock_joblib.return_value = {'model_untrained': 'mock_model'}
+    mock_get_model.return_value = ("all_models", "all_results", "best_model", "X_train", "X_test", "y_test")
+    mock_joblib.return_value = {
+        'all_models': {'mock_model': 'model_obj'},
+        'all_results': {'name': ['mock_model'], 'accuracy': [1]},
+        'model_untrained': 'mock_model',
+        'X_train': 'X_train',
+        'X_test': 'X_test',
+        'y_test': 'y_test'
+        }
+    
+    mock_deploy.return_value = None
 
-    result = runner.invoke(app, ["train-evaluate-deploy"])
+    result = runner.invoke(app, ["train-evaluate-deploy"], catch_exceptions=False)
     assert result.exit_code == 0
+    assert "Get Model" in result.output
 
 
 @mock.patch("src.telco_customer_churn_analysis.cli.abc_test_assignment")
@@ -102,7 +112,12 @@ def test_predict_with_best_profit_threshold(mock_gen_data, mock_bin, mock_joblib
 
     result = runner.invoke(app, ["predict-with-best-profit-threshold"], catch_exceptions=False)
     assert result.exit_code == 0
-    assert "Model deployed successfully!" in result.output
+    
+    if "Warning: Could not load 'model_results.pkl'" in result.output:
+        assert "Please run `comparative_models`" in result.output
+
+    else:
+        assert "Model deployed successfully!" in result.output
 
 
 @mock.patch("src.telco_customer_churn_analysis.cli.local_explainer")

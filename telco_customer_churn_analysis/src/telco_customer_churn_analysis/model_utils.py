@@ -635,8 +635,8 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     y_test = pd.Series(dtype='int')
     best_model_name = 'N/A'
 
-    try:
-        if os.path.exists('model_results.pkl'):
+    if os.path.exists('model_results.pkl'):
+        try:
             print("Loading model... (skipping training)")
             saved_data = joblib.load('model_results.pkl')
 
@@ -649,11 +649,17 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
 
             print('\n\n--- Model Results ---')
             print(all_results[['name', 'recall', 'precision', 'accuracy', 'f1', 'roc_auc']])
-
             print(f"\n\n--- Best Model: {all_results['name'].iloc[0]} ---\n\n")
-
+            
             return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
-        
+            
+        except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
+            print(f'Saved model file is corrupted or incomplete: {type(e).__name__} - {e}. Retraining model...')
+
+        except Exception:
+            print(f'Unexpected error loading saved model: {type(e).__name__} - {e}. Retraining model...')
+
+    try:
         print('Start training models ...')
         X, y, X_train, X_test, y_train, y_test, preprocessor, preprocessor_trained = preprocess_data(df, target, cols_to_drop, test_size, random_state)
 
@@ -670,7 +676,7 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
         best_models, model_results = train_evaluate_model(X_train, X_test, y_train, y_test, params, metric)
 
         best_voting_model, vot_model_results = voting_model(X_train, X_test, y_train, y_test, best_models,
-                                                            metric=metric, random_state=random_state)
+                                                                metric=metric, random_state=random_state)
 
         model_results = pd.DataFrame(model_results)
         vot_model_results = pd.DataFrame(vot_model_results)
@@ -687,7 +693,7 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
             valid_sort_cols = [col for col in sort_cols if col in all_results.columns]
             if valid_sort_cols:
                 all_results = all_results.sort_values(by=valid_sort_cols, ascending=False,
-                                                      ignore_index=True)
+                                                        ignore_index=True)
 
         if not all_results.empty:
             best_model_name = all_results['name'].iloc[0]
@@ -888,8 +894,11 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
 
             return existing_pipeline
         
+        except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
+            print(f'Warning: Could not load existing deployment pipeline ({type(e).__name__}), retraining and deploying.')
+        
         except Exception as e:
-            print(f"Warning: Could not load existing deployment pipeline ({e}), retraining and deploying.")
+            print(f"Unexpected error loading deployment pipeline ({type(e).__name__}), retraining and deploying.")
     
     if cols_to_drop is None:
         cols_to_drop_list: List[str] = []
