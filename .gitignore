@@ -206,7 +206,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Files
-.pkl
+*.pkl
 
 # Elastic Beanstalk local files
 .elasticbeanstalk/*.zip

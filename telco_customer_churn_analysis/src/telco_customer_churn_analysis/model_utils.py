@@ -656,7 +656,7 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
         except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
             print(f'Saved model file is corrupted or incomplete: {type(e).__name__} - {e}. Retraining model...')
 
-        except Exception:
+        except Exception as e:
             print(f'Unexpected error loading saved model: {type(e).__name__} - {e}. Retraining model...')
 
     try:
