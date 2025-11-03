@@ -999,14 +999,15 @@ class TestDeploymentModel:
                             lambda *args, **kwargs: (dummy_X, dummy_y, None, None, None, None, preprocessor, None)
                             )
         
-        with mock.patch('joblib.dump') as mock_joblib_dump:
-            deployment_pipeline = deployment_model(df, fitted_pipeline, target, cols_to_drop=drop_cols)
+        with mock.patch("os.path.exists", return_value=False):
+            with mock.patch('joblib.dump') as mock_joblib_dump:
+                deployment_pipeline = deployment_model(df, fitted_pipeline, target, cols_to_drop=drop_cols)
 
-            assert isinstance(deployment_pipeline, Pipeline)
-            assert 'classifier' in deployment_pipeline.named_steps
-            assert 'preprocessor' in deployment_pipeline.named_steps
-            mock_joblib_dump.assert_called_once()
-            assert mock_joblib_dump.call_args[0][1] == 'deployment_pipeline.pkl'
+                assert isinstance(deployment_pipeline, Pipeline)
+                assert 'classifier' in deployment_pipeline.named_steps
+                assert 'preprocessor' in deployment_pipeline.named_steps
+                mock_joblib_dump.assert_called_once()
+                assert "deployment_pipeline" in mock_joblib_dump.call_args[0][1]
 
 
     @staticmethod
@@ -1028,11 +1029,13 @@ class TestDeploymentModel:
         )
 
         drop_cols = ['drop_me', 'high_cat_str']
-        with mock.patch("joblib.dump") as mock_joblib_dump:
-            deployment_pipeline = deployment_model(df, model, target, cols_to_drop=drop_cols)
 
-            assert isinstance(deployment_pipeline, Pipeline)
-            mock_joblib_dump.assert_called_once()
+        with mock.patch("os.path.exists", return_value=False):
+            with mock.patch("joblib.dump") as mock_joblib_dump:
+                deployment_pipeline = deployment_model(df, model, target, cols_to_drop=drop_cols)
+
+                assert isinstance(deployment_pipeline, Pipeline)
+                mock_joblib_dump.assert_called_once()
 
 
     @staticmethod
@@ -1046,8 +1049,9 @@ class TestDeploymentModel:
             ('preprocessor', mock.MagicMock())
         ])
 
-        with pytest.raises(ValueError, match="must contain a 'classifier' step"):
-            deployment_model(df, model, target, cols_to_drop=None)
+        with mock.patch("os.path.exists", return_value=False):
+            with pytest.raises(ValueError, match="must contain a 'classifier' step"):
+                deployment_model(df, model, target, cols_to_drop=None)
 
 
     @staticmethod
@@ -1071,14 +1075,15 @@ class TestDeploymentModel:
                             lambda *args, **kwargs: (dummy_X, dummy_y, None, None, None, None, preprocessor, None)
                             )
         
-        with mock.patch('joblib.dump') as mock_joblib_dump:
-            deployment_pipeline = deployment_model(df, pipeline, target, 'high_cat_str')
-            assert isinstance(deployment_pipeline, Pipeline)
+        with mock.patch("os.path.exists", return_value=False):
+            with mock.patch('joblib.dump') as mock_joblib_dump:
+                deployment_pipeline = deployment_model(df, pipeline, target, 'high_cat_str')
+                assert isinstance(deployment_pipeline, Pipeline)
 
-            deployment_pipeline = deployment_model(df, pipeline, target, drop_cols)
-            assert isinstance(deployment_pipeline, Pipeline)
+                deployment_pipeline = deployment_model(df, pipeline, target, drop_cols)
+                assert isinstance(deployment_pipeline, Pipeline)
 
-            assert mock_joblib_dump.call_count == 2
+                assert mock_joblib_dump.call_count == 2
 
 
 ## predict_churn tests

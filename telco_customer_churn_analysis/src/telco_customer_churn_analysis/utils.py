@@ -11,6 +11,7 @@ import random
 import os
 import kagglehub
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
+import sys
 
 ## Data Wrangling Functions
 
@@ -46,7 +47,7 @@ def safe_display(data: Any) -> Any:
         print(data)
 
     except Exception as e:
-        print(f'Error: Failed to display data. Falling back to print(). Details: {e}.')
+        print(f'Error: Failed to display data. Falling back to print(). Details: {e}.', file=sys.stderr)
         print(data)
 
     return data

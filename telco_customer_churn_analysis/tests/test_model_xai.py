@@ -23,7 +23,8 @@ try:
 except ImportError:
   class LGBMClassifier: pass
 
-from src.telco_customer_churn_analysis.model_xai import (model_global_explainer, model_local_explainer)
+from src.telco_customer_churn_analysis.model_xai import (model_global_explainer, model_global_explainer_app,
+                                                         model_local_explainer, model_local_explainer_app)
 
 @pytest.fixture(autouse=True)
 def suppress_show(monkeypatch):
@@ -220,6 +221,51 @@ class TestModelGlobalExplainer:
         assert X_test_for_shap_arg.shape[0] == 1000
 
 
+## test model global explainer app
+
+class TestModelGlobalExplainerApp:
+    @staticmethod
+    def test_raises_value_error_if_not_pipeline(sample_df):
+        with pytest.raises(ValueError, match="The 'model' must be a sklearn.pipeline.Pipeline object"):
+            model_global_explainer_app(mock.MagicMock(), sample_df, sample_df)
+
+    @staticmethod
+    def test_raises_value_error_if_missing_steps(sample_df):
+        bad_pipeline = Pipeline(steps=[('only_step', mock.MagicMock())])
+        with pytest.raises(ValueError, match="Pipeline must contain steps named 'preprocessor' and 'classifier'"):
+            model_global_explainer_app(bad_pipeline, sample_df, sample_df)
+
+    @staticmethod
+    def test_attribute_error_on_feature_names(tree_model_pipeline, sample_df):
+        tree_model_pipeline.named_steps['preprocessor'].get_feature_names_out.side_effect = AttributeError()
+        with pytest.raises(AttributeError, match="Failed to retrieve feature names"):
+            model_global_explainer_app(tree_model_pipeline, sample_df, sample_df)
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
+    def test_tree_explainer_used(mock_shap, tree_model_pipeline, sample_df):
+        model_global_explainer_app(tree_model_pipeline, sample_df, sample_df)
+        mock_shap.TreeExplainer.assert_called_once()
+        mock_shap.KernelExplainer.assert_not_called()
+        mock_shap.summary_plot.assert_called_once()
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
+    def test_kernel_explainer_used(mock_shap, linear_model_pipeline, sample_df):
+        model_global_explainer_app(linear_model_pipeline, sample_df, sample_df)
+        mock_shap.KernelExplainer.assert_called_once()
+        mock_shap.TreeExplainer.assert_not_called()
+        mock_shap.kmeans.assert_called_once()
+        mock_shap.summary_plot.assert_called_once()
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
+    def test_kernel_explainer_limits_test_set(mock_shap, linear_model_pipeline, sample_df):
+        large_df = pd.concat([sample_df] * 2).reset_index(drop=True)
+        model_global_explainer_app(linear_model_pipeline, sample_df, large_df, random_state=1)
+        call_args = mock_shap.KernelExplainer.return_value.shap_values.call_args[0]
+        assert call_args[0].shape[0] <= 1000
+
 
 ## test model local explainer
 
@@ -293,3 +339,52 @@ class TestModelLocalExplainer:
         model_predict_proba_arg = kernel_explainer_call[0]
 
         assert model_predict_proba_arg == linear_model_pipeline.named_steps['classifier'].predict_proba
+
+
+## test model local explainer app
+
+class TestModelLocalExplainerApp:
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.model_xai.shap.TreeExplainer')
+    def test_local_model_explainer_raises_value_error_if_index_out_of_bounds(mock_tree_explainer, tree_model_pipeline, sample_df):
+        """Test ValueError when the index is not valid for X_test."""
+
+        mock_tree_explainer.return_value = mock.MagicMock()
+
+        X_test = sample_df.loc[: 10]
+
+        mock_preprocessor = tree_model_pipeline.named_steps['preprocessor']
+
+        mock_preprocessor.transform.side_effect = [
+            np.random.rand(1100, 5),
+            np.random.rand(11, 5),
+            np.random.rand(1100, 5),
+            np.random.rand(11, 5)
+        ]
+
+        index = 11
+        error_match = f"ValueError: Index {index} is out of bounds. Must be between 0 and {len(X_test) - 1}."
+        with pytest.raises(ValueError, match=error_match):
+            model_local_explainer_app(tree_model_pipeline, sample_df, X_test, index=index)
+
+        index = -1
+        error_match = f"ValueError: Index {index} is out of bounds. Must be between 0 and {len(X_test) - 1}."
+        with pytest.raises(ValueError, match=error_match):
+            model_local_explainer_app(tree_model_pipeline, sample_df, X_test, index=index)
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
+    def test_tree_explainer_and_waterfall(mock_shap, tree_model_pipeline, sample_df):
+        model_local_explainer_app(tree_model_pipeline, sample_df, sample_df, index=5)
+        mock_shap.TreeExplainer.assert_called_once()
+        mock_shap.KernelExplainer.assert_not_called()
+        mock_shap.waterfall_plot.assert_called_once()
+
+    @staticmethod
+    @mock.patch('src.telco_customer_churn_analysis.model_xai.shap')
+    def test_kernel_explainer_and_waterfall(mock_shap, linear_model_pipeline, sample_df):
+        model_local_explainer_app(linear_model_pipeline, sample_df, sample_df, index=5)
+        mock_shap.KernelExplainer.assert_called_once()
+        mock_shap.TreeExplainer.assert_not_called()
+        mock_shap.kmeans.assert_called_once()
+        mock_shap.waterfall_plot.assert_called_once()

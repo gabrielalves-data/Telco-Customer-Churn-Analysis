@@ -231,15 +231,18 @@ def test_predict_with_xai_app_basic(capsys):
     """Test XAI prediction function without XAI requests (default behavior)."""
 
     df = generate_test_data()
-    html = predict_with_xai_app(df=df, threshold_input=0.5)
+    predicted_html, global_xai_img, local_xai_img = predict_with_xai_app(df=df, threshold_input=0.5)
     captured = capsys.readouterr()
-    assert isinstance(html, str)
-    assert 'No xai request' in captured.out
+    
+    assert isinstance(predicted_html, str)
+    assert global_xai_img == ""
+    assert local_xai_img == ""
+    assert "No xai request" in captured.out
 
 def test_predict_with_xai_app_features_and_xai(capsys):
     """Test XAI prediction with both global and local explainability requests."""
 
-    html = predict_with_xai_app(
+    predicted_html, global_xai_img, local_xai_img = predict_with_xai_app(
         City='CityY',
         Gender='Male',
         Tenure_Months=24,
@@ -248,7 +251,9 @@ def test_predict_with_xai_app_features_and_xai(capsys):
         index_local=0
     )
     captured = capsys.readouterr()
-    assert isinstance(html, str)
+    assert isinstance(predicted_html, str)
+    assert isinstance(global_xai_img, str)
+    assert isinstance(local_xai_img, str)
     assert 'Features cleaned' in captured.out
     assert 'Got global xai requests' in captured.out
     assert 'Got local xai requests' in captured.out

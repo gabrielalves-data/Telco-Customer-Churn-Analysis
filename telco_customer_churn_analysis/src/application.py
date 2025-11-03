@@ -3,7 +3,7 @@ from flask import Flask, render_template_string, request, redirect, url_for, fla
 import pandas as pd
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
-from telco_customer_churn_analysis.src.telco_customer_churn_analysis.telco_customer_churn_analysis_app import (
+from telco_customer_churn_analysis.telco_customer_churn_analysis_app import (
     data_preprocessing_app, exploratory_analysis_app, hypothesis_test_app, train_evaluate_deploy_app,
     predict_with_best_profit_threshold_app, predict_with_xai_app)
 
@@ -35,7 +35,7 @@ a:hover { text-decoration: underline; }
   z-index: 9999;
   top: 0; left: 0;
   width: 100%; height: 100%;
-  background: rgba(255, 255, 255, 0.9);
+  background: #f4f6f8;
   backdrop-filter: blur(4px);
   text-align: center;
   align-items: center;
@@ -63,6 +63,12 @@ a:hover { text-decoration: underline; }
   font-size: 1.2em;
   font-weight: bold;
 }
+
+#loading-text-time {
+  color: #007BFF;
+  font-size: 0.9em;
+  font-weight: bold;
+}
 </style>
 
 <script>
@@ -79,6 +85,7 @@ def index():
     <div id="loading-overlay">
       <div class="spinner"></div>
       <div id="loading-text">Loading page... please wait</div>
+      <div id="loading-text-time">...Can take up to 5 min...</div>
     </div>
 
     <div class="container">
@@ -582,7 +589,7 @@ def predict_xai():
             index_local = int(request.form.get("index_local") or 0)
             threshold_input = float(request.form.get("threshold_input") or 0.5)
 
-            html_table = predict_with_xai_app(
+            html_table, global_xai_img, local_xai_img = predict_with_xai_app(
                 **features,
                 threshold_input=threshold_input,
                 global_xai=global_xai,
@@ -657,18 +664,31 @@ def predict_xai():
               &#x1F3E0;
             </a>
             <div class="container my-4 wide-container">
-                <h2 class="mb-3">Predict Churn with XAI Options</h2>
                 <div class="mt-4">
                     <a href="{{ url_for('predict_xai') }}" class="btn btn-primary">Try Again</a>
                 </div>
+                <h2 class="mb-3">Predict Churn with XAI Options</h2>
                 <div class="alert alert-success">
                     <strong>Prediction successful!</strong><br>
                     {% if global_xai %}Global XAI generated ✔️<br>{% endif %}
                     {% if local_xai %}Local XAI (index {{ index_local }}) generated ✔️<br>{% endif %}
                 </div>
                 {{ styled_table|safe }}
+                {% if global_xai or local_xai %}
+                <div class="xai-plots mt-4">
+                    {% if global_xai %}
+                    <h3>Global Feature Importance</h3>
+                    <img src="{{ global_xai_img }}" class="img-fluid mb-4"/>
+                    {% endif %}
+                    {% if local_xai %}
+                    <h3>Local Explanation (index {{ index_local }})</h3>
+                    <img src="{{ local_xai_img }}" class="img-fluid mb-4"/>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
-            """, styled_table=styled_table, global_xai=global_xai, local_xai=local_xai, index_local=index_local)
+            """, styled_table=styled_table, global_xai=global_xai, local_xai=local_xai, index_local=index_local,
+            global_xai_img=global_xai_img, local_xai_img=local_xai_img)
 
         except Exception as e:
             print('Error during XAI prediction:', e)
@@ -930,4 +950,4 @@ def predict_xai():
 
 
 if __name__ == "__main__":
-    application.run(debug=True)
+    application.run(host='0.0.0.0', port=5000, debug=True)

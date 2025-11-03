@@ -17,6 +17,11 @@ import os
 
 from .utils import (safe_display)
 
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+
+MODEL_RESULTS_PATH = os.path.join(BASE_PATH, "model_results.pkl")
+DEPLOYMENT_PIPELINE_PATH = os.path.join(BASE_PATH, "deployment_pipeline.pkl")
+
 def preprocess_data(df: pd.DataFrame, target: str,
                     cols_to_drop: Optional[Union[str, List[str]]] = None, test_size: float = 0.2,
                     random_state: int = 123) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, ColumnTransformer, ColumnTransformer]:
@@ -635,10 +640,10 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     y_test = pd.Series(dtype='int')
     best_model_name = 'N/A'
 
-    if os.path.exists('model_results.pkl'):
+    if os.path.exists(MODEL_RESULTS_PATH):
         try:
             print("Loading model... (skipping training)")
-            saved_data = joblib.load('model_results.pkl')
+            saved_data = joblib.load(MODEL_RESULTS_PATH)
 
             all_models = saved_data['all_models']
             all_results = saved_data['all_results']
@@ -669,10 +674,8 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
         baseline_score = cross_val_score(models['LogisticRegression'], X, y, cv=5, scoring=metric)
         print('-' * 100)
         print(f'\nBaseline Logistic Regression Score: {np.mean(baseline_score):.4f}.\n')
-        print('-' * 100)
 
-        print('\n','-' * 50,'Comparative Models Results','-' * 50,'\n')
-        print('Dtypes,', X_train.dtypes, X_train.dtypes, y_test.dtypes)
+        print('-' * 50,'Comparative Models Results','-' * 50,'\n')
         best_models, model_results = train_evaluate_model(X_train, X_test, y_train, y_test, params, metric)
 
         best_voting_model, vot_model_results = voting_model(X_train, X_test, y_train, y_test, best_models,
@@ -703,10 +706,10 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
             best_model_name = 'N/A'
             model_object_by_metric = None
 
-        print('\n','-' * 50,'Model Results','-' * 50,'\n')
+        print('-' * 50,'Model Results','-' * 50,'\n')
         safe_display(all_results[['name', 'accuracy', 'recall', 'precision', 'f1', 'roc_auc', 'params']])
 
-        print('\n','-' * 50,f'Best Model: {best_model_name} by Metric: {metric}','-' * 50,'\n')
+        print('-' * 50,f'Best Model: {best_model_name} by Metric: {metric}','-' * 50,'\n')
 
         try:
             joblib.dump({
@@ -717,9 +720,9 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
                 'X_test': X_test,
                 'y_test': y_test
                 },
-                'model_results.pkl'
+                MODEL_RESULTS_PATH
                 )
-            print("Deployment pipeline saved successfully to 'model_results.pkl'.")
+            print("Deployment pipeline saved successfully.")
 
         except Exception as e:
             print("Error saving model with joblib: {e}.")
@@ -887,10 +890,10 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
     Saves the fitted Pipeline to 'deployment_pipeline.pkl'.
     """
 
-    if os.path.exists("deployment_pipeline.pkl"):
+    if os.path.exists(DEPLOYMENT_PIPELINE_PATH):
         print("Deployment model already exists - loading existing pipeline (skipping retraining and deployment).")
         try:
-            existing_pipeline = joblib.load("deployment_pipeline.pkl")
+            existing_pipeline = joblib.load(DEPLOYMENT_PIPELINE_PATH)
 
             return existing_pipeline
         
@@ -942,8 +945,8 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
     print('Retraining complete.')
 
     try:
-        joblib.dump(deployment_pipeline,'deployment_pipeline.pkl')
-        print("Deployment pipeline saved successfully to 'deployment_pipeline.pkl'.")
+        joblib.dump(deployment_pipeline,DEPLOYMENT_PIPELINE_PATH)
+        print("Deployment pipeline saved successfully.")
 
     except Exception as e:
         print("Error saving model with joblib: {e}.")
@@ -951,7 +954,7 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
     return deployment_pipeline
 
 
-def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = 'deployment_pipeline.pkl') -> pd.DataFrame:
+def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = DEPLOYMENT_PIPELINE_PATH) -> pd.DataFrame:
     """
     Predicts churn probabilities using a deployed model, flags high-risk customers,
     and returns a ranked list for intervention.

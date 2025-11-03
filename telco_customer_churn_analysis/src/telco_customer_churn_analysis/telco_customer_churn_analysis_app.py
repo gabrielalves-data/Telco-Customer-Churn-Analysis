@@ -22,11 +22,16 @@ from .utils import (kaggle_download, safe_display, read_excel, df_head,
                                                      drop_labels, count_plot, histogram, heatmap,
                                                      bin_and_plot, chi_squared_test, generate_data, features_to_df)
 
-from .model_xai import (model_global_explainer, model_local_explainer)
+from .model_xai import (model_global_explainer_app, model_local_explainer_app)
 
 from .telco_customer_churn_analysis import (data_preprocessing, generate_test_data, bin_df, get_model, deploy_model,
                                             features_to_dataframe, predict_df, abc_test_assignment, profit_curve_threshold,
                                             global_explainer, local_explainer)
+
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+
+MODEL_RESULTS_PATH = os.path.join(BASE_PATH, "model_results.pkl")
+DEPLOYMENT_PIPELINE_PATH = os.path.join(BASE_PATH, "deployment_pipeline.pkl")
 
 
 def data_preprocessing_app():
@@ -432,6 +437,7 @@ def train_evaluate_deploy_app():
                 'State', 'Zip Code', 'Latitude', 'Longitude','Churn Value', 'Churn Score', 'CLTV', 'Churn Reason',
                 'Churn Probability', 'Customer Value', 'Tenure Months','Total Charges']
                 )
+    print('After deploy')
         
     return output_buffer.getvalue()
 
@@ -525,16 +531,16 @@ def predict_with_best_profit_threshold_app(df=None, y_test=None, aggfunc: str = 
     print('--- User Df ---')
     print(df)
 
-    if y_test is None:
-        with open('model_results.pkl', 'rb') as deployed_model:
-            bundle = joblib.load(deployed_model)
-        
-        y_test = bundle['y_test']
-
-    with open('model_results.pkl', 'rb') as deployed_model:
+    if not os.path.exists(MODEL_RESULTS_PATH):
+        raise FileNotFoundError(f"Model file not found: {MODEL_RESULTS_PATH}")
+    
+    with open(MODEL_RESULTS_PATH, 'rb') as deployed_model:
         bundle = joblib.load(deployed_model)
     
     model_df = bundle['all_results']
+
+    if y_test is None:
+        y_test = bundle['y_test']
     
     threshold = profit_curve_threshold(aggfunc, col, model_df, cost, retention_rate, y_test)
 
@@ -638,30 +644,41 @@ def predict_with_xai_app(df = None, threshold_input: float = 0.5,
 
     predicted_df = predict_df(df, threshold_input)
 
-    with open('deployment_pipeline.pkl', 'rb') as deployed_model:
+    if not os.path.exists(DEPLOYMENT_PIPELINE_PATH):
+        raise FileNotFoundError(f"Deployment pipeline file not found: {DEPLOYMENT_PIPELINE_PATH}")
+    
+    with open(DEPLOYMENT_PIPELINE_PATH, 'rb') as deployed_model:
         bundle = joblib.load(deployed_model)
         
     model = bundle
 
     print('No xai request')
 
+    global_xai_img = ""
+    local_xai_img = ""
+
     if global_xai:
         print('Got global xai requests')
-        with open('model_results.pkl', 'rb') as deployed_model:
+        if not os.path.exists(MODEL_RESULTS_PATH):
+            raise FileNotFoundError(f"Model file not found: {MODEL_RESULTS_PATH}")
+        with open(MODEL_RESULTS_PATH, 'rb') as deployed_model:
             bundle = joblib.load(deployed_model)
 
         X_train, X_test = bundle['X_train'], bundle['X_test']
 
-        global_explainer(model, X_train, X_test)
+        global_xai_img = model_global_explainer_app(model, X_train, X_test)
 
     if local_xai:
         print('Got local xai requests')
-        with open('model_results.pkl', 'rb') as deployed_model:
+        if not os.path.exists(MODEL_RESULTS_PATH):
+            raise FileNotFoundError(f"Model file not found: {MODEL_RESULTS_PATH}")
+        with open(MODEL_RESULTS_PATH, 'rb') as deployed_model:
             bundle = joblib.load(deployed_model)
 
         X_train, X_test = bundle['X_train'], bundle['X_test']
 
-        local_explainer(model, X_train, X_test, index_local)
+        local_xai_img = model_local_explainer_app(model, X_train, X_test, index_local)
 
+    predicted_html = predicted_df.to_html(classes="table table-bordered table-striped", index=False)
 
-    return predicted_df.to_html(classes="table table-bordered table-striped", index=False)
+    return predicted_html, global_xai_img, local_xai_img
