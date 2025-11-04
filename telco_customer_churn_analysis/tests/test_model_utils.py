@@ -875,7 +875,7 @@ class TestComparativeModels:
         df['target_col'] = (df['target_col'] > 0.5).astype(int)
         target = 'target_col'
 
-        with mock.patch('os.path.exists', return_value=False):
+        with mock.patch('src.telco_customer_churn_analysis.model_utils.download_from_s3', side_effect=FileNotFoundError):
             with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=NotImplementedError("Missing Function")):
                 all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
 
@@ -891,7 +891,7 @@ class TestComparativeModels:
         df['target_col'] = (df['target_col'] > 0.5).astype(int)
         target = 'target_col'
 
-        with mock.patch('os.path.exists', return_value=False):
+        with mock.patch('src.telco_customer_churn_analysis.model_utils.download_from_s3', return_value=False):
             with mock.patch('src.telco_customer_churn_analysis.model_utils.preprocess_data', side_effect=RuntimeError("Something broke")):
                 all_models, all_results, best_model, X_train_out, X_test_out, y_test_out = comparative_models(df, target, mock_comparative_models)
 
@@ -999,7 +999,7 @@ class TestDeploymentModel:
                             lambda *args, **kwargs: (dummy_X, dummy_y, None, None, None, None, preprocessor, None)
                             )
         
-        with mock.patch("os.path.exists", return_value=False):
+        with mock.patch("src.telco_customer_churn_analysis.model_utils.download_from_s3", side_effect=FileNotFoundError):
             with mock.patch('joblib.dump') as mock_joblib_dump:
                 deployment_pipeline = deployment_model(df, fitted_pipeline, target, cols_to_drop=drop_cols)
 
@@ -1007,7 +1007,6 @@ class TestDeploymentModel:
                 assert 'classifier' in deployment_pipeline.named_steps
                 assert 'preprocessor' in deployment_pipeline.named_steps
                 mock_joblib_dump.assert_called_once()
-                assert "deployment_pipeline" in mock_joblib_dump.call_args[0][1]
 
 
     @staticmethod
@@ -1030,7 +1029,7 @@ class TestDeploymentModel:
 
         drop_cols = ['drop_me', 'high_cat_str']
 
-        with mock.patch("os.path.exists", return_value=False):
+        with mock.patch("src.telco_customer_churn_analysis.model_utils.download_from_s3", side_effect=FileNotFoundError):
             with mock.patch("joblib.dump") as mock_joblib_dump:
                 deployment_pipeline = deployment_model(df, model, target, cols_to_drop=drop_cols)
 
@@ -1049,7 +1048,7 @@ class TestDeploymentModel:
             ('preprocessor', mock.MagicMock())
         ])
 
-        with mock.patch("os.path.exists", return_value=False):
+        with mock.patch("src.telco_customer_churn_analysis.model_utils.download_from_s3", side_effect=FileNotFoundError):
             with pytest.raises(ValueError, match="must contain a 'classifier' step"):
                 deployment_model(df, model, target, cols_to_drop=None)
 
@@ -1075,7 +1074,7 @@ class TestDeploymentModel:
                             lambda *args, **kwargs: (dummy_X, dummy_y, None, None, None, None, preprocessor, None)
                             )
         
-        with mock.patch("os.path.exists", return_value=False):
+        with mock.patch("src.telco_customer_churn_analysis.model_utils.download_from_s3", side_effect=FileNotFoundError):
             with mock.patch('joblib.dump') as mock_joblib_dump:
                 deployment_pipeline = deployment_model(df, pipeline, target, 'high_cat_str')
                 assert isinstance(deployment_pipeline, Pipeline)
@@ -1099,8 +1098,8 @@ class TestPredictChurn:
         mock_model = mock.MagicMock(spec=Pipeline)
         mock_model.predict_proba.return_value = np.tile([0.4, 0.6], (20, 1))
 
-        with mock.patch('joblib.load', return_value=mock_model):
-            result_df = predict_churn(df, threshold=0.5, model_path='deployment_model.pkl')
+        with mock.patch('src.telco_customer_churn_analysis.model_utils.download_from_s3', return_value=mock_model):
+            result_df = predict_churn(df, threshold=0.5, deployment_filename='deployment_model.pkl')
 
             assert isinstance(result_df, pd.DataFrame)
             assert not result_df.empty

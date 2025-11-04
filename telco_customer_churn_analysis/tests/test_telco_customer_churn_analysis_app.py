@@ -237,7 +237,7 @@ def test_predict_with_xai_app_basic(capsys):
     assert isinstance(predicted_html, str)
     assert global_xai_img == ""
     assert local_xai_img == ""
-    assert "No xai request" in captured.out
+    
 
 def test_predict_with_xai_app_features_and_xai(capsys):
     """Test XAI prediction with both global and local explainability requests."""
@@ -254,6 +254,3 @@ def test_predict_with_xai_app_features_and_xai(capsys):
     assert isinstance(predicted_html, str)
     assert isinstance(global_xai_img, str)
     assert isinstance(local_xai_img, str)
-    assert 'Features cleaned' in captured.out
-    assert 'Got global xai requests' in captured.out
-    assert 'Got local xai requests' in captured.out

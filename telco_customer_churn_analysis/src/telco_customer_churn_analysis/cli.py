@@ -4,14 +4,18 @@ import typer
 from rich.console import Console
 import joblib
 from typing import Optional
+import os
 
 from src.telco_customer_churn_analysis.telco_customer_churn_analysis import (data_preprocessing, exploratory_analysis,profit_curve_threshold, deploy_model,
                                             get_model,abc_test_assignment, predict_df, bin_df, generate_test_data, hypothesis_test,
                                             local_explainer, global_explainer, features_to_dataframe)
 from src.telco_customer_churn_analysis.telco_customer_churn_analysis_app import bin_df_app
+from src.telco_customer_churn_analysis.s3_utils import MODELS_DIR
+
 app = typer.Typer()
 console = Console()
 
+MODEL_RESULTS_PATH = os.path.join(MODELS_DIR, "model_results.pkl")
 
 @app.command()
 def eda():
@@ -88,7 +92,7 @@ def train_evaluate_deploy():
 
     print('Cli Train before model')
 
-    with open('model_results.pkl', 'rb') as r:
+    with open(MODEL_RESULTS_PATH, 'rb') as r:
         model_results = joblib.load(r)
 
     best_model = model_results['model_untrained']

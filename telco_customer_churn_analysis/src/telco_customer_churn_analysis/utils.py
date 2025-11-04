@@ -1,8 +1,9 @@
 import pandas as pd
 from typing import Union, Dict, List, Any, Optional, Tuple, Callable, Literal
 from IPython import display
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import seaborn as sns
 import pingouin
 import warnings

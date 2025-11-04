@@ -18,7 +18,6 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY telco_customer_churn_analysis ./telco_customer_churn_analysis
-COPY *.pkl telco_customer_churn_analysis/
 
 ENV PYTHONPATH=/app/telco_customer_churn_analysis/src
 

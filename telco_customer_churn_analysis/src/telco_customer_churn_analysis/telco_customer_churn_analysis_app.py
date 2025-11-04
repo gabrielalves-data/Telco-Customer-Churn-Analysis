@@ -4,13 +4,14 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 import matplotlib.pyplot as plt
-from typing import Optional
+from typing import Optional, Tuple
 import os
 from flask import current_app
 import io
 from contextlib import redirect_stdout
 import joblib
 import traceback
+import sys
 
 from .model_utils import (preprocess_data, model_pipelines, hyperparameters, train_evaluate_model,
                                                            voting_model, comparative_models, profit_curve, deployment_model,
@@ -28,10 +29,10 @@ from .telco_customer_churn_analysis import (data_preprocessing, generate_test_da
                                             features_to_dataframe, predict_df, abc_test_assignment, profit_curve_threshold,
                                             global_explainer, local_explainer)
 
-BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+from .s3_utils import USE_S3, STATIC_DIR, S3_BUCKET, s3, download_from_s3, download_image_from_s3, upload_image_to_s3
 
-MODEL_RESULTS_PATH = os.path.join(BASE_PATH, "model_results.pkl")
-DEPLOYMENT_PIPELINE_PATH = os.path.join(BASE_PATH, "deployment_pipeline.pkl")
+MODEL_FILENAME = "model_results.pkl"
+DEPLOYMENT_FILENAME = "deployment_pipeline.pkl"
 
 
 def data_preprocessing_app():
@@ -103,33 +104,48 @@ def data_preprocessing_app():
 
 def exploratory_analysis_app(df: pd.DataFrame):
     """
-    Perform exploratory data analysis (EDA) and generate distribution plots for Telco customer data.
+    Perform exploratory data analysis (EDA) on Telco customer data and generate visualizations.
 
-    This function creates count plots and histograms for categorical and numerical features, 
-    including churn-related variables. It also generates binned plots for tenure, churn probability, 
-    and customer value. Plots are saved in pages under the Flask app's `static/eda` folder for visualization.
+    This function generates a variety of plots for both categorical and numerical features,
+    including churn-related variables, tenure, churn probability, and customer value.
+    The generated plots are saved to the Flask app's `static/eda` folder for visualization.
+    Additionally, certain numerical features are binned into categories, which are added
+    as new columns to the DataFrame.
+
+    The function also supports S3 storage: if configured, it checks whether the plot images
+    already exist in S3 to avoid redundant generation and optionally uploads newly created plots.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        The preprocessed Telco customer dataset.
+        The preprocessed Telco customer dataset containing features such as:
+        'City', 'Gender', 'Senior Citizen', 'Partner', 'Phone Service', 'Internet Service',
+        'Churn Value', 'Churn Score', 'CLTV', etc.
 
     Returns
     -------
-    tuple[pandas.DataFrame, list[str]]
-        - The DataFrame potentially augmented with additional binned columns.
-        - A list of filenames corresponding to the saved EDA plots.
+    tuple[pd.DataFrame, list[str]]
+        - The DataFrame, potentially augmented with new binned columns:
+          'Tenure Group', 'Churn Probability', and 'Customer Value'.
+        - A list of filenames of the saved EDA plot images.
 
     Raises
     ------
     KeyError
         If expected columns are missing from the DataFrame.
     RuntimeError
-        If plotting or binning encounters an unexpected error.
+        If plotting or binning operations encounter an unexpected error.
+
+    Notes
+    -----
+    - The function uses helper plotting functions such as `count_plot`, `histogram`, 
+      `heatmap`, and `bin_and_plot`.
+    - The plots are paginated (6 per page) and saved as PNG images.
+    - For churn-related analysis, a subset of the DataFrame with churned customers is used.
     """
 
-    static_eda_dir = os.path.join(current_app.root_path, 'static', 'eda')
-    os.makedirs(static_eda_dir, exist_ok=True)
+    eda_dir = os.path.join(STATIC_DIR, "eda")
+    os.makedirs(eda_dir, exist_ok=True)
 
     plot_funcs = []
 
@@ -209,9 +225,35 @@ def exploratory_analysis_app(df: pd.DataFrame):
     cols = 3
     total_pages = (plot_counts + plots_per_page - 1) // plots_per_page
 
-    image_filenames = []
+    image_paths = []
     
     for page in range(total_pages):
+        filename = f"eda_page_{page + 1}.png"
+        path = os.path.join(eda_dir, filename)
+
+        image_exists = False
+
+        if USE_S3 and s3:
+            s3_key = f"eda/{filename}"
+
+            try:
+                s3.head_object(Bucket=S3_BUCKET, Key=s3_key)
+                image_exists = True
+
+                if not os.path.exists(path):
+                    download_image_from_s3(filename, s3_key)
+
+            except s3.exceptions.ClientError:
+                image_exists = False
+        
+        else:
+            image_exists = False
+
+        if image_exists:
+            print(f"Skipping generation of {filename}, already exists", file=sys.stderr)
+            image_paths.append(filename)
+            continue
+
         start_idx = page * plots_per_page
         end_idx = min(start_idx + plots_per_page, plot_counts)
 
@@ -239,13 +281,16 @@ def exploratory_analysis_app(df: pd.DataFrame):
         plt.tight_layout(pad=3.0, w_pad=2.5, h_pad=3.5)
 
         filename = f"eda_page_{page + 1}.png"
-        filepath = os.path.join(static_eda_dir, filename)
+        filepath = os.path.join(eda_dir, filename)
         plt.savefig(filepath)
         plt.close()
 
-        image_filenames.append(filename)
+        if USE_S3:
+            upload_image_to_s3(filepath, f"eda/{filename}")
+        
+        image_paths.append(filename)
 
-    return df, image_filenames
+    return df, image_paths
 
 
 def bin_df_app(df: pd.DataFrame, show: bool = False):
@@ -408,7 +453,8 @@ def train_evaluate_deploy_app():
     Returns
     -------
     str
-        Captured printed output including training, evaluation, and deployment logs.
+        Captured printed output including preprocessing, training, evaluation, and deployment logs.
+
 
     Raises
     ------
@@ -427,7 +473,7 @@ def train_evaluate_deploy_app():
             print('Model Created')
 
         except Exception as e:
-            print(f"Error while loading or training model: {e}")
+            print(f"Error while loading or training model: {e}", file=sys.stderr)
             traceback.print_exc()
             raise
 
@@ -479,15 +525,17 @@ def predict_with_best_profit_threshold_app(df=None, y_test=None, aggfunc: str = 
     City, Gender, Senior_Citizen, Partner, Dependents, Tenure_Months, Phone_Service, Multiple_Lines,
     Internet_Service, Online_Security, Online_Backup, Device_Protection, Tech_Support, Streaming_TV,
     Streaming_Movies, Contract, Paperless_Billing, Payment_Method, Monthly_Charges, Total_Charges : optional
-        Individual customer feature values for prediction.
+        Individual customer feature values for prediction. If provided, a DataFrame will be created from these values;
+        otherwise, the `df` input or synthetic test data will be used.
 
     Returns
     -------
     tuple
         threshold : float
-            Optimal churn prediction threshold from the profit curve.
+            Optimal churn prediction threshold derived from the profit curve.
         predicted_df_html : str
-            HTML table of the predicted churn outcomes with optional ABC assignment.
+            HTML table of predicted churn outcomes, optionally with ABC assignment applied.
+
 
     Raises
     ------
@@ -531,11 +579,8 @@ def predict_with_best_profit_threshold_app(df=None, y_test=None, aggfunc: str = 
     print('--- User Df ---')
     print(df)
 
-    if not os.path.exists(MODEL_RESULTS_PATH):
-        raise FileNotFoundError(f"Model file not found: {MODEL_RESULTS_PATH}")
-    
-    with open(MODEL_RESULTS_PATH, 'rb') as deployed_model:
-        bundle = joblib.load(deployed_model)
+    print("Loading model bundle from S3", file=sys.stderr)
+    bundle = download_from_s3(MODEL_FILENAME)
     
     model_df = bundle['all_results']
 
@@ -569,20 +614,22 @@ def predict_with_xai_app(df = None, threshold_input: float = 0.5,
                          Tech_Support: Optional[str] = None, Streaming_TV: Optional[str] = None,
                          Streaming_Movies: Optional[str] = None, Contract: Optional[str] = None,
                          Paperless_Billing: Optional[str] = None, Payment_Method: Optional[str] = None,
-                         Monthly_Charges: Optional[float] = None, Total_Charges: Optional[float] = None):
+                         Monthly_Charges: Optional[float] = None, Total_Charges: Optional[float] = None) -> Tuple[str, str, str]:
     """
-    Predict customer churn using a specified threshold and optionally generate XAI explanations.
+    Predict customer churn using a deployed model and optionally generate explainable AI (XAI) outputs.
 
-    The function accepts either a full DataFrame or individual customer feature inputs. 
-    It bins the data, applies the deployed model to predict churn, and can generate
-    global or local explainable AI (XAI) outputs.
+    The function accepts either a full DataFrame (`df`) or individual feature inputs. It applies
+    binning to numerical features, uses the deployed model to predict churn probabilities, 
+    converts them to binary predictions based on `threshold_input`, and can generate global or
+    local XAI explanations.
 
     Parameters
     ----------
     df : pd.DataFrame, optional
-        Input dataset for prediction. If None, new synthetic data will be generated.
+        Input dataset for prediction. If None and individual features are not provided, 
+        synthetic test data will be generated.
     threshold_input : float, default=0.5
-        Threshold for converting predicted probabilities into binary churn predictions.
+        Threshold for converting predicted churn probabilities into binary predictions.
     global_xai : bool, default=False
         If True, generates global model explanations.
     local_xai : bool, default=False
@@ -592,18 +639,20 @@ def predict_with_xai_app(df = None, threshold_input: float = 0.5,
     City, Gender, Senior_Citizen, Partner, Dependents, Tenure_Months, Phone_Service, Multiple_Lines,
     Internet_Service, Online_Security, Online_Backup, Device_Protection, Tech_Support, Streaming_TV,
     Streaming_Movies, Contract, Paperless_Billing, Payment_Method, Monthly_Charges, Total_Charges : optional
-        Individual customer feature values. If provided, a DataFrame will be created from these features 
+        Individual customer feature values. If provided, a DataFrame will be created from these features
         for prediction.
 
     Returns
     -------
-    str
-        HTML table of predicted churn results.
+    tuple
+        - HTML table (str) of predicted churn results.
+        - Global XAI visualization (str or image path), empty string if `global_xai=False`.
+        - Local XAI visualization (str or image path), empty string if `local_xai=False`.
 
     Raises
     ------
     FileNotFoundError
-        If the deployed model or results file cannot be found.
+        If the deployed model or required files cannot be found.
     ValueError
         If feature inputs are invalid or incompatible with the deployed model.
     """
@@ -644,38 +693,22 @@ def predict_with_xai_app(df = None, threshold_input: float = 0.5,
 
     predicted_df = predict_df(df, threshold_input)
 
-    if not os.path.exists(DEPLOYMENT_PIPELINE_PATH):
-        raise FileNotFoundError(f"Deployment pipeline file not found: {DEPLOYMENT_PIPELINE_PATH}")
-    
-    with open(DEPLOYMENT_PIPELINE_PATH, 'rb') as deployed_model:
-        bundle = joblib.load(deployed_model)
+    deployment_bundle = download_from_s3(DEPLOYMENT_FILENAME)
         
-    model = bundle
-
-    print('No xai request')
+    model = deployment_bundle
 
     global_xai_img = ""
     local_xai_img = ""
 
+    results_bundle = download_from_s3(MODEL_FILENAME)
+    
     if global_xai:
-        print('Got global xai requests')
-        if not os.path.exists(MODEL_RESULTS_PATH):
-            raise FileNotFoundError(f"Model file not found: {MODEL_RESULTS_PATH}")
-        with open(MODEL_RESULTS_PATH, 'rb') as deployed_model:
-            bundle = joblib.load(deployed_model)
-
-        X_train, X_test = bundle['X_train'], bundle['X_test']
+        X_train, X_test = results_bundle['X_train'], results_bundle['X_test']
 
         global_xai_img = model_global_explainer_app(model, X_train, X_test)
 
     if local_xai:
-        print('Got local xai requests')
-        if not os.path.exists(MODEL_RESULTS_PATH):
-            raise FileNotFoundError(f"Model file not found: {MODEL_RESULTS_PATH}")
-        with open(MODEL_RESULTS_PATH, 'rb') as deployed_model:
-            bundle = joblib.load(deployed_model)
-
-        X_train, X_test = bundle['X_train'], bundle['X_test']
+        X_train, X_test = results_bundle['X_train'], results_bundle['X_test']
 
         local_xai_img = model_local_explainer_app(model, X_train, X_test, index_local)
 

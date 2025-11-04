@@ -14,13 +14,13 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from typing import Union, Dict, List, Any, Optional, Tuple
 import joblib
 import os
+import sys
 
 from .utils import (safe_display)
+from .s3_utils import USE_S3, download_from_s3, upload_to_s3
 
-BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-
-MODEL_RESULTS_PATH = os.path.join(BASE_PATH, "model_results.pkl")
-DEPLOYMENT_PIPELINE_PATH = os.path.join(BASE_PATH, "deployment_pipeline.pkl")
+MODEL_FILENAME = "model_results.pkl"
+DEPLOYMENT_FILENAME = "deployment_pipeline.pkl"
 
 def preprocess_data(df: pd.DataFrame, target: str,
                     cols_to_drop: Optional[Union[str, List[str]]] = None, test_size: float = 0.2,
@@ -592,34 +592,34 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     Parameters
     ----------
     df : pd.DataFrame
-        Input dataset.
+        Input dataset containing features and target column.
     target : str
         Name of the target variable column.
-    comparative_models : dict
-        Dictionary of scikit-learn classifier objects to compare against Logistic Regression.
-    cols_to_drop : str or list, optional
+    comparative_models : dict[str, ClassifierMixin]
+        Dictionary mapping model names to scikit-learn classifier objects to compare against Logistic Regression.
+    cols_to_drop : str, list of str, or None, optional
         Columns to exclude from features. Defaults to None.
     metric : str, default 'f1'
-        Metric for evaluating models and sorting results.
+        Metric used to evaluate models and rank results.
     test_size : float, default 0.2
-        Fraction of data reserved for testing.
+        Fraction of the dataset reserved for testing.
     random_state : int, default 123
         Seed for reproducibility.
 
     Returns
     -------
     all_models : dict
-        Dictionary of best trained models, including the final VotingClassifier.
+        Dictionary of trained models, including the VotingClassifier if constructed.
     all_results : pd.DataFrame
-        DataFrame summarizing metrics, best parameters, and top features for all models.
+        DataFrame summarizing evaluation metrics, best parameters, and top features for all models.
     model_object_by_metric : Pipeline
-        Best-performing model based on the specified metric.
+        Best-performing model pipeline based on the specified metric.
     X_train : pd.DataFrame
         Training features used.
     X_test : pd.DataFrame
         Testing features used.
     y_test : pd.Series
-        Test target variable.
+        True labels for the test set.
 
     Raises
     ------
@@ -632,6 +632,7 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     `hyperparameters`, `train_evaluate_model`, and `voting_model`.
     """
 
+
     all_models = {}
     all_results = pd.DataFrame()
     model_object_by_metric: Union[Pipeline, None] = None
@@ -640,32 +641,33 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
     y_test = pd.Series(dtype='int')
     best_model_name = 'N/A'
 
-    if os.path.exists(MODEL_RESULTS_PATH):
-        try:
-            print("Loading model... (skipping training)")
-            saved_data = joblib.load(MODEL_RESULTS_PATH)
+    try:
+        print("Loading models... (skipping training)")
+        source = "s3" if USE_S3 else "locally"
+        print(f"Loading models from {source}", file=sys.stderr)
+        saved_data = download_from_s3(MODEL_FILENAME)
 
-            all_models = saved_data['all_models']
-            all_results = saved_data['all_results']
-            model_object_by_metric = saved_data['model_untrained']
-            X_train = saved_data['X_train']
-            X_test = saved_data['X_test']
-            y_test = saved_data['y_test']
+        all_models = saved_data['all_models']
+        all_results = saved_data['all_results']
+        model_object_by_metric = saved_data['model_untrained']
+        X_train = saved_data['X_train']
+        X_test = saved_data['X_test']
+        y_test = saved_data['y_test']
 
-            print('\n\n--- Model Results ---')
-            print(all_results[['name', 'recall', 'precision', 'accuracy', 'f1', 'roc_auc']])
-            print(f"\n\n--- Best Model: {all_results['name'].iloc[0]} ---\n\n")
+        print('\n\n--- Model Results ---')
+        print(all_results[['name', 'recall', 'precision', 'accuracy', 'f1', 'roc_auc']])
+        print(f"\n\n--- Best Model: {all_results['name'].iloc[0]} ---\n\n")
             
-            return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
+        return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
             
-        except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
-            print(f'Saved model file is corrupted or incomplete: {type(e).__name__} - {e}. Retraining model...')
+    except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
+        print(f'Saved model file is corrupted or incomplete: {type(e).__name__} - {e}. Retraining model...', file=sys.stderr)
 
-        except Exception as e:
-            print(f'Unexpected error loading saved model: {type(e).__name__} - {e}. Retraining model...')
+    except Exception as e:
+        print(f'Unexpected error loading saved model: {type(e).__name__} - {e}. Retraining model...', file=sys.stderr)
 
     try:
-        print('Start training models ...')
+        print('Start training models ...', file=sys.stderr)
         X, y, X_train, X_test, y_train, y_test, preprocessor, preprocessor_trained = preprocess_data(df, target, cols_to_drop, test_size, random_state)
 
         models = model_pipelines(preprocessor, comparative_models, random_state)
@@ -712,25 +714,26 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
         print('-' * 50,f'Best Model: {best_model_name} by Metric: {metric}','-' * 50,'\n')
 
         try:
-            joblib.dump({
+            saved_obj = {
                 'all_models': all_models,
                 'all_results': all_results,
                 'model_untrained': model_object_by_metric,
                 'X_train': X_train,
                 'X_test': X_test,
                 'y_test': y_test
-                },
-                MODEL_RESULTS_PATH
-                )
-            print("Deployment pipeline saved successfully.")
+                }
+            
+            upload_to_s3(saved_obj, MODEL_FILENAME)
+
+            print("Training model results saved successfully.")
 
         except Exception as e:
-            print("Error saving model with joblib: {e}.")
+            print("Error saving model with joblib: {e}.", file=sys.stderr)
 
         return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
 
     except NotImplementedError as e:
-        print(f"Execution failed: A required helper function is missing: {e}.")
+        print(f"Execution failed: A required helper function is missing: {e}.", file=sys.stderr)
         all_models = {}
         all_results = pd.DataFrame()
         model_object_by_metric = None
@@ -741,7 +744,7 @@ def comparative_models(df: pd.DataFrame, target: str, comparative_models: Dict[s
         return all_models, all_results, model_object_by_metric, X_train, X_test, y_test
 
     except Exception as e:
-        print(f"An unexpected error occurred during the workflow: {type(e).__name__} - {e}.")
+        print(f"An unexpected error occurred during the workflow: {type(e).__name__} - {e}.", file=sys.stderr)
         all_models = {}
         all_results = pd.DataFrame()
         model_object_by_metric = None
@@ -862,23 +865,21 @@ def profit_curve(model_df: pd.DataFrame, median_value: float, cost: float, reten
 def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
                      cols_to_drop: Optional[Union[str, List[str]]]) -> Pipeline:
     """
-    Retrains the final, best-performing model on the entire dataset (X + y)
-    and saves the fully fitted scikit-learn Pipeline for deployment.
+    Retrains the final, best-performing model on the entire dataset and saves the fully fitted scikit-learn Pipeline for deployment.
 
-    Constructs a new Pipeline with the unfitted preprocessor and classifier
-    and fits it to all available data. Saves the trained Pipeline to
-    'deployment_pipeline.pkl'.
+    Constructs a new Pipeline with the unfitted preprocessor and classifier from the input model,
+    fits it to all available data, and saves the trained Pipeline to 'deployment_pipeline.pkl'.
 
     Parameters
     ----------
-    df : pandas.DataFrame
+    df : pd.DataFrame
         Full raw dataset containing features and target.
     model : sklearn.pipeline.Pipeline
-        Best-performing, fitted Pipeline from model comparison stage.
+        Best-performing pipeline from the model comparison stage. Must contain 'preprocessor' and 'classifier' steps.
     target : str
         Name of the target variable column.
-    cols_to_drop : str or list, optional
-        Columns to drop from features before retraining.
+    cols_to_drop : str, list of str, or None
+        Columns to drop from features before retraining. Defaults to None.
 
     Returns
     -------
@@ -887,21 +888,22 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
 
     Side Effects
     ------------
-    Saves the fitted Pipeline to 'deployment_pipeline.pkl'.
+    Saves the fitted pipeline to 'deployment_pipeline.pkl' and optionally uploads to S3.
     """
 
-    if os.path.exists(DEPLOYMENT_PIPELINE_PATH):
+    try:
         print("Deployment model already exists - loading existing pipeline (skipping retraining and deployment).")
-        try:
-            existing_pipeline = joblib.load(DEPLOYMENT_PIPELINE_PATH)
+        existing_pipeline = download_from_s3(DEPLOYMENT_FILENAME)
+        source = "s3" if USE_S3 else "locally"
+        print(f"Getting model from {source}", file=sys.stderr)
 
-            return existing_pipeline
-        
-        except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
-            print(f'Warning: Could not load existing deployment pipeline ({type(e).__name__}), retraining and deploying.')
-        
-        except Exception as e:
-            print(f"Unexpected error loading deployment pipeline ({type(e).__name__}), retraining and deploying.")
+        return existing_pipeline
+            
+    except (EOFError, FileNotFoundError, KeyError, joblib.externals.loky.process_executor.TerminatedWorkerError) as e:
+        print(f'Warning: Could not load existing deployment pipeline ({type(e).__name__}), retraining and deploying.', file=sys.stderr)
+            
+    except Exception as e:
+        print(f"Unexpected error loading deployment pipeline ({type(e).__name__}), retraining and deploying.", file=sys.stderr)
     
     if cols_to_drop is None:
         cols_to_drop_list: List[str] = []
@@ -945,37 +947,39 @@ def deployment_model(df: pd.DataFrame, model: Pipeline, target: str,
     print('Retraining complete.')
 
     try:
-        joblib.dump(deployment_pipeline,DEPLOYMENT_PIPELINE_PATH)
+        upload_to_s3(deployment_pipeline, DEPLOYMENT_FILENAME)
+        source = "s3" if USE_S3 else "locally"
+        print(f"Deployment pipeline saved {source}", file=sys.stderr)
         print("Deployment pipeline saved successfully.")
 
     except Exception as e:
-        print("Error saving model with joblib: {e}.")
+        print("Error saving model with joblib: {e}.", file=sys.stderr)
 
     return deployment_pipeline
 
 
-def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = DEPLOYMENT_PIPELINE_PATH) -> pd.DataFrame:
+def predict_churn(df: pd.DataFrame, threshold: float, deployment_filename: str = "deployment_pipeline.pkl") -> pd.DataFrame:
     """
     Predicts churn probabilities using a deployed model, flags high-risk customers,
     and returns a ranked list for intervention.
 
-    Loads a fitted deployment pipeline, calculates probabilities, applies
-    the optimal threshold, and adds an intervention flag.
+    Loads a fitted deployment pipeline, calculates churn probabilities,
+    applies the specified threshold, and adds an intervention flag.
 
     Parameters
     ----------
-    df : pandas.DataFrame
+    df : pd.DataFrame
         Raw customer data to score.
     threshold : float
-        Probability threshold for flagging customers (from Profit Curve).
-    model_path : str, optional
-        Path to the saved deployment pipeline. Defaults to 'deployment_pipeline.pkl'.
+        Probability threshold for flagging customers (from profit curve).
+    deployment_filename : str, optional
+        Path or filename of the saved deployment pipeline. Defaults to 'deployment_pipeline.pkl'.
 
     Returns
     -------
-    pandas.DataFrame
-        DataFrame containing all customers with predicted churn probability and
-        intervention flag. Sorted by 'Churn Probability' descending.
+    pd.DataFrame
+        DataFrame containing all customers with predicted churn probabilities ('Churn Probability')
+        and an 'Intervention Flag' (1 if probability >= threshold, else 0), sorted by probability descending.
 
     Side Effects
     ------------
@@ -985,7 +989,8 @@ def predict_churn(df: pd.DataFrame, threshold: float, model_path: str = DEPLOYME
     loaded_model: Optional[Pipeline] = None
 
     try:
-        loaded_model = joblib.load(model_path)
+        print("Loading deployment pipeline from S3", file=sys.stderr)
+        loaded_model = download_from_s3(deployment_filename)
 
     except FileNotFoundError:
         print("Error: Model Path Not Found")
