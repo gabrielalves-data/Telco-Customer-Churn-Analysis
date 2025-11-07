@@ -67,12 +67,13 @@ def test_hypothesis_tests_chi2_insufficient_columns(mock_bin, mock_data):
         hypothesis_tests_chi2(data_choice='Test')
 
 
+@mock.patch("builtins.open", new_callable=mock.mock_open)
 @mock.patch("src.telco_customer_churn_analysis.cli.joblib.load")
 @mock.patch("src.telco_customer_churn_analysis.cli.get_model")
 @mock.patch("src.telco_customer_churn_analysis.cli.bin_df")
 @mock.patch("src.telco_customer_churn_analysis.cli.data_preprocessing")
 @mock.patch("src.telco_customer_churn_analysis.cli.deploy_model")
-def test_train_evaluate_deploy(mock_deploy, mock_preprocess, mock_bin, mock_get_model, mock_joblib):
+def test_train_evaluate_deploy(mock_deploy, mock_preprocess, mock_bin, mock_get_model, mock_joblib, mock_file):
     """Test that 'train-evaluate-deploy' CLI command executes successfully."""
 
     mock_preprocess.return_value = "mock_df"
