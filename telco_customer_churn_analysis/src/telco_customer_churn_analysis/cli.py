@@ -6,11 +6,11 @@ import joblib
 from typing import Optional
 import os
 
-from src.telco_customer_churn_analysis.telco_customer_churn_analysis import (data_preprocessing, exploratory_analysis,profit_curve_threshold, deploy_model,
+from .telco_customer_churn_analysis import (data_preprocessing, exploratory_analysis,profit_curve_threshold, deploy_model,
                                             get_model,abc_test_assignment, predict_df, bin_df, generate_test_data, hypothesis_test,
                                             local_explainer, global_explainer, features_to_dataframe)
-from src.telco_customer_churn_analysis.telco_customer_churn_analysis_app import bin_df_app
-from src.telco_customer_churn_analysis.s3_utils import MODELS_DIR
+from .telco_customer_churn_analysis_app import bin_df_app
+from .s3_utils import MODELS_DIR
 
 app = typer.Typer()
 console = Console()
