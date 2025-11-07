@@ -60,15 +60,15 @@ jobs:
         # exit-zero treats all errors as warnings
         ruff check --exit-zero --statistics .
 
-    - name: Download model from S3
+    - name: 🗄️ Download model from S3
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }} 
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_DEFAULT_REGION: us-east-1
       run: |
         mkdir -p telco_customer_churn_analysis/src/telco_customer_churn_analysis/models
-        aws s3 cp s3://telco-customer-churn-analysis/model_results.pkl telco_customer_churn_analysis/src/telco_customer_churn_analysis/models/
-        aws s3 cp s3://telco-customer-churn-analysis/deployment_pipeline.pkl telco_customer_churn_analysis/src/telco_customer_churn_analysis/models/
+        aws s3 cp s3://telco-customer-churn-analysis/models/model_results.pkl telco_customer_churn_analysis/src/telco_customer_churn_analysis/models/
+        aws s3 cp s3://telco-customer-churn-analysis/models/deployment_pipeline.pkl telco_customer_churn_analysis/src/telco_customer_churn_analysis/models/
 
     - name: 🧪 Run Pytest
       run: |
