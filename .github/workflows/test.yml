@@ -66,7 +66,7 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_DEFAULT_REGION: us-east-1
       run: |
-        mkdir -p telco_customer_churn_analysis/src/telco_customer_churn_analysis/models
+        mkdir -p telco_customer_churn_analysis/src/models
         aws s3 cp s3://telco-customer-churn-analysis/models/model_results.pkl telco_customer_churn_analysis/src/telco_customer_churn_analysis/models/
         aws s3 cp s3://telco-customer-churn-analysis/models/deployment_pipeline.pkl telco_customer_churn_analysis/src/telco_customer_churn_analysis/models/
 
