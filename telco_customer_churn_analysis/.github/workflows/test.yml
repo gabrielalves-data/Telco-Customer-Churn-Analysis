@@ -1,7 +1,13 @@
 # This workflow will install Python dependencies, run tests and lint.
 # For more information see: https://docs.github.com/en/actions/use-cases-and-examples/building-and-testing/building-and-testing-python
 
-name: Test Python application
+# ============================================================
+# GitHub Actions CI for Telco Customer Churn Analysis
+# ------------------------------------------------------------
+# Installs dependencies, lints with Ruff, and runs pytest tests
+# ============================================================
+
+name: 🧪 Test and Lint (Telco Customer Churn Analysis)
 
 on:
   push:
@@ -16,31 +22,44 @@ jobs:
   build:
     strategy:
       matrix:
-        # Test all supported Python versions under Ubuntu
         os: [ubuntu-latest]
         python-version: ['3.12', '3.13']
 
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: 🛎️ Checkout Code  
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
+
+    - name: ♻️ Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements_dev.txt
-    - name: Lint with ruff
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        if [ -f requirements_dev.txt ]; then pip install -r requirements_dev.txt; fi
+        pip install pytest ruff
+
+    - name: 🧹 Lint with ruff
       run: |
+        echo "Running Ruff lint checks..."
         # stop the build if there are Python syntax errors or undefined names
-        ruff check --select=E9,F63,F7,F82
+        ruff check --select=E9,F63,F7,F82 .
         # exit-zero treats all errors as warnings
-        ruff check --exit-zero --statistics
-    - name: Install project
+        ruff check --exit-zero --statistics .
+
+    - name: 🧪 Run Pytest
       run: |
-        pip install .
-    - name: Run tests
-      run: |
-        pytest
+        echo "Running unit tests..."
+        pytest -v --disable-warnings --maxfail=1
