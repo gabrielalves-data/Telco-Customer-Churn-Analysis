@@ -1,16 +1,78 @@
 import os
-from flask import Flask, render_template_string, request, redirect, url_for, flash, render_template
+from flask import Flask, render_template_string, request, redirect, url_for, flash, render_template, session
 import pandas as pd
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
+from authlib.integrations.flask_client import OAuth
+from functools import wraps
+
 from telco_customer_churn_analysis.telco_customer_churn_analysis_app import (
     data_preprocessing_app, exploratory_analysis_app, hypothesis_test_app, train_evaluate_deploy_app,
     predict_with_best_profit_threshold_app, predict_with_xai_app)
 
-load_dotenv()
+dotenv_path = os.path.join(os.path.dirname(__file__), "../../.env")
+dotenv_path = os.path.abspath(os.path.normpath(dotenv_path))
+load_dotenv(dotenv_path)
 
 application = Flask(__name__)
 application.secret_key = os.getenv("FLASK_SECRET_KEY", "flask_key")
+
+oauth = OAuth(application)
+
+oauth.register(
+    name='cognito',
+    client_id=os.getenv('COGNITO_APP_CLIENT_ID'),
+    client_secret=os.getenv('COGNITO_APP_CLIENT_SECRET'),
+    server_metadata_url=f"https://cognito-idp.{os.getenv('COGNITO_REGION')}.amazonaws.com/{os.getenv('COGNITO_USERPOOL_ID')}/.well-known/openid-configuration",
+    client_kwargs={'scope': 'email openid'} 
+)
+
+
+def login_required(f):
+    """Decorator to ensure user is logged in via Cognito"""
+    @wraps(f)
+    def decorator(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorator
+
+
+def extract_features_from_form(form):
+    def conv_int(val):
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+    def conv_float(val):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "City": form.get("City"),
+        "Gender": form.get("Gender"),
+        "Senior_Citizen": form.get("Senior_Citizen"),
+        "Partner": form.get("Partner"),
+        "Dependents": form.get("Dependents"),
+        "Tenure_Months": conv_int(form.get("Tenure_Months")),
+        "Phone_Service": form.get("Phone_Service"),
+        "Multiple_Lines": form.get("Multiple_Lines"),
+        "Internet_Service": form.get("Internet_Service"),
+        "Online_Security": form.get("Online_Security"),
+        "Online_Backup": form.get("Online_Backup"),
+        "Device_Protection": form.get("Device_Protection"),
+        "Tech_Support": form.get("Tech_Support"),
+        "Streaming_TV": form.get("Streaming_TV"),
+        "Streaming_Movies": form.get("Streaming_Movies"),
+        "Contract": form.get("Contract"),
+        "Paperless_Billing": form.get("Paperless_Billing"),
+        "Payment_Method": form.get("Payment_Method"),
+        "Monthly_Charges": conv_float(form.get("Monthly_Charges")),
+        "Total_Charges": conv_float(form.get("Total_Charges")),
+    }
+
 
 base_css = """
 <style>
@@ -81,14 +143,41 @@ function showLoading() {
 
 @application.route("/")
 def index():
+    user_logged_in = "user" in session
+    print('User: ', user_logged_in)
     return render_template_string(base_css + """
+    <style>
+      .top-left {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+      }
+    </style>
+                                  
     <div id="loading-overlay">
       <div class="spinner"></div>
       <div id="loading-text">Loading page... please wait</div>
       <div id="loading-text-time">...Can take up to 5 min...</div>
     </div>
+                                  
+    <div class="top-left">
+      {% if user_logged_in %}
+        <p>Welcome, {{ session['user']['email'] }}!</p>
+        <a href="{{ url_for('logout') }}"><button>Logout</button></a>
+      {% else %}
+        <a href="{{ url_for('login') }}"><button>Login</button></a>
+      {% endif %}
+    </div>
 
     <div class="container">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+                                  
       <h1>Telco Customer Churn Analysis</h1>
       <ul>
         <li><a href="{{ url_for('run_eda') }}" onclick="showLoading()">Run Exploratory Data Analysis (EDA)</a></li>
@@ -98,10 +187,34 @@ def index():
         <li><a href="{{ url_for('predict_xai') }}" onclick="showLoading()">Predict with Explainable AI (XAI)</a></li>
       </ul>
     </div>
-    """)
+    """, user_logged_in=user_logged_in)
+
+
+@application.route("/login")
+def login():
+    redirect_uri = url_for('authorize', _external=True)
+    return oauth.cognito.authorize_redirect(redirect_uri, prompt='login')
+
+
+@application.route("/authorize")
+def authorize():
+    token = oauth.cognito.authorize_access_token()
+    user = token['userinfo']
+    session['user'] = user
+    flash("Logged in successfully!", "success")
+    return redirect(url_for('index'))
+
+
+@application.route("/logout")
+def logout():
+    session.pop('user', None)
+    flash("Logged out successfully", "success")
+
+    return redirect(url_for('index'))
 
 
 @application.route("/eda")
+@login_required
 def run_eda():
     try:
         df, preprocessing_text = data_preprocessing_app()
@@ -116,6 +229,7 @@ def run_eda():
 
 
 @application.route("/hypothesis_tests", methods=["GET", "POST"])
+@login_required
 def run_hypothesis_tests():
     if request.method == "POST":
         data_choice = request.form.get("data_choice")
@@ -179,6 +293,7 @@ def run_hypothesis_tests():
 
 
 @application.route("/train_evaluate_deploy")
+@login_required
 def run_train_evaluate_deploy():
     try:
         result_text = train_evaluate_deploy_app()
@@ -189,43 +304,8 @@ def run_train_evaluate_deploy():
         return redirect(url_for("index"))
 
 
-def extract_features_from_form(form):
-    def conv_int(val):
-        try:
-            return int(val)
-        except (TypeError, ValueError):
-            return None
-    def conv_float(val):
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
-
-    return {
-        "City": form.get("City"),
-        "Gender": form.get("Gender"),
-        "Senior_Citizen": form.get("Senior_Citizen"),
-        "Partner": form.get("Partner"),
-        "Dependents": form.get("Dependents"),
-        "Tenure_Months": conv_int(form.get("Tenure_Months")),
-        "Phone_Service": form.get("Phone_Service"),
-        "Multiple_Lines": form.get("Multiple_Lines"),
-        "Internet_Service": form.get("Internet_Service"),
-        "Online_Security": form.get("Online_Security"),
-        "Online_Backup": form.get("Online_Backup"),
-        "Device_Protection": form.get("Device_Protection"),
-        "Tech_Support": form.get("Tech_Support"),
-        "Streaming_TV": form.get("Streaming_TV"),
-        "Streaming_Movies": form.get("Streaming_Movies"),
-        "Contract": form.get("Contract"),
-        "Paperless_Billing": form.get("Paperless_Billing"),
-        "Payment_Method": form.get("Payment_Method"),
-        "Monthly_Charges": conv_float(form.get("Monthly_Charges")),
-        "Total_Charges": conv_float(form.get("Total_Charges")),
-    }
-
-
 @application.route("/predict_best_threshold", methods=["GET", "POST"])
+@login_required
 def predict_best_threshold():
     if request.method == "POST":
         features = extract_features_from_form(request.form)
@@ -570,6 +650,7 @@ def predict_best_threshold():
 
 
 @application.route("/predict_xai", methods=["GET", "POST"])
+@login_required
 def predict_xai():
     if request.method == "POST":
         features = extract_features_from_form(request.form)
