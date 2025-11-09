@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from authlib.integrations.flask_client import OAuth
 from functools import wraps
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from telco_customer_churn_analysis.telco_customer_churn_analysis_app import (
     data_preprocessing_app, exploratory_analysis_app, hypothesis_test_app, train_evaluate_deploy_app,
@@ -16,6 +17,7 @@ load_dotenv(dotenv_path)
 
 application = Flask(__name__)
 application.secret_key = os.getenv("FLASK_SECRET_KEY", "flask_key")
+application.wsgi_app = ProxyFix(application.wsgi_app, x_proto=1, x_host=1)
 
 oauth = OAuth(application)
 
