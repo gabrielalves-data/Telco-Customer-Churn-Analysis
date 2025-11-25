@@ -26,7 +26,7 @@ oauth.register(
     client_id=os.getenv('COGNITO_APP_CLIENT_ID'),
     client_secret=os.getenv('COGNITO_APP_CLIENT_SECRET'),
     server_metadata_url=f"https://cognito-idp.{os.getenv('COGNITO_REGION')}.amazonaws.com/{os.getenv('COGNITO_USERPOOL_ID')}/.well-known/openid-configuration",
-    client_kwargs={'scope': 'email openid'} 
+    client_kwargs={'scope': 'email openid profile'} 
 )
 
 
@@ -78,13 +78,15 @@ def extract_features_from_form(form):
 
 base_css = """
 <style>
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
+
 body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0;}
 .container { max-width: 800px; margin: 30px auto; background: white; padding: 20px; border-radius: 6px; box-shadow: 0 0 10px #ccc;}
 h1, h2 { color: #333; }
 input[type=text], input[type=number], select { width: 100%; padding: 8px; margin: 6px 0 12px; border: 1px solid #ccc; border-radius: 4px; }
 button { background-color: #007BFF; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
 button:hover { background-color: #0056b3; }
-.flash { padding: 10px; border-radius: 4px; margin-bottom: 15px;}
+.flash { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 12px 20px; border-radius: 6px; z-index: 10000; font-weight: bold; opacity: 1; transition: opacity 0.5s ease;}
 .flash-success { background-color: #d4edda; color: #155724; }
 .flash-error { background-color: #f8d7da; color: #721c24; }
 pre { background: #eee; padding: 15px; border-radius: 6px; overflow-x: auto; }
@@ -133,12 +135,128 @@ a:hover { text-decoration: underline; }
   font-size: 0.9em;
   font-weight: bold;
 }
+
+.top-left {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+}
+
+.top-right {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+}
+
+.back-button {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  background-color: #007BFF;
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+.back-button:hover {
+  background-color: #0056b3;
+}
+
+.navbar {
+    width: 100%;
+    height: 60px;
+    background: #e6eef7;   /* light blue/grey */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 9999;
+    flex-wrap: wrap;
+    box-sizing: border-box;
+}
+
+.nav-left,
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nav-right span {
+    display: inline-block;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.navbar a.button {
+    background-color: #007BFF;
+    padding: 8px 14px;
+    color: white;
+    border-radius: 4px;
+    font-size: 14px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.navbar a.button:hover {
+    background-color: #0056b3;
+}
+
+body {
+    padding-top: 70px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #007BFF;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: bold;
+}
+.btn-primary:hover {
+  background-color: #0056b3;
+}
+
 </style>
 
 <script>
 function showLoading() {
   document.getElementById('loading-overlay').style.display = 'flex';
 }
+
+window.addEventListener('DOMContentLoaded', () => {
+    const flashes = document.querySelectorAll('.flash');
+    flashes.forEach(flash => {
+        setTimeout(() => {
+            flash.style.opacity = '0';
+            setTimeout(() => flash.remove(), 500); // remove from DOM after fade out
+        }, 3000);
+    });
+});
 </script>
 """
 
@@ -147,28 +265,34 @@ function showLoading() {
 def index():
     user_logged_in = "user" in session
     print('User: ', user_logged_in)
-    return render_template_string(base_css + """
-    <style>
-      .top-left {
-        position: absolute;
-        top: 20px;
-        right: 20px;
-      }
-    </style>
-                                  
+    return render_template_string(base_css + """                     
     <div id="loading-overlay">
       <div class="spinner"></div>
       <div id="loading-text">Loading page... please wait</div>
       <div id="loading-text-time">...Can take up to 5 min...</div>
     </div>
                                   
-    <div class="top-left">
-      {% if user_logged_in %}
-        <p>Welcome, {{ session['user']['email'] }}!</p>
-        <a href="{{ url_for('logout') }}"><button>Logout</button></a>
-      {% else %}
-        <a href="{{ url_for('login') }}"><button>Login</button></a>
-      {% endif %}
+    <div class="navbar">
+        <div class="nav-left">
+            <a href="{{ url_for('index') }}" class="button">
+                <i class="fas fa-home"></i> Home
+            </a>
+        </div>
+
+        <div class="nav-right">
+            {% if session.get('user') %}
+                <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                    👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}
+                </span>
+                <a href="{{ url_for('logout') }}" class="button">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="button">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+            {% endif %}
+        </div>
     </div>
 
     <div class="container">
@@ -202,6 +326,7 @@ def login():
 def authorize():
     token = oauth.cognito.authorize_access_token()
     user = token['userinfo']
+    print(user)
     session['user'] = user
     flash("Logged in successfully!", "success")
     return redirect(url_for('index'))
@@ -209,7 +334,7 @@ def authorize():
 
 @application.route("/logout")
 def logout():
-    session.pop('user', None)
+    session.clear()
     flash("Logged out successfully", "success")
 
     return redirect(url_for('index'))
@@ -250,29 +375,26 @@ def run_hypothesis_tests():
 
     print('Test outside the if')
     return render_template_string(base_css + """
-        <style>
-          .back-button {
-              position: fixed;
-              top: 10px;
-              left: 10px;
-              text-decoration: none;
-              font-size: 16px;
-              color: #333;
-              border: 1px solid #ccc;
-              padding: 8px 12px;
-              border-radius: 5px;
-              background-color: #f9f9f9;
-              transition: background-color 0.3s ease;
-              z-index: 1000;
-          }
-          .back-button:hover {
-              background-color: #e0e0e0;
-          }
-        </style>
-
-        <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
-          &#x1F3E0;
-        </a>
+        <div class="navbar">
+            <div class="nav-left">
+                <a href="{{ url_for('index') }}" class="button">
+                    <i class="fas fa-home"></i> Home
+                </a>
+            </div>
+            <div class="nav-right">
+                {% if session.get('user') %}
+                    <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                        👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}</span>
+                    <a href="{{ url_for('logout') }}" class="button">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="button">
+                        <i class="fas fa-sign-in-alt"></i> Login
+                    </a>
+                {% endif %}
+            </div>
+        </div>
         <div class="container">
         <h2>Run Hypothesis Tests (Chi2)</h2>
         <form method="POST">
@@ -363,21 +485,62 @@ def predict_best_threshold():
                 text-align: center;
                 padding: 0.5rem 0.75rem;
               }}
-              .back-button {{
+              .navbar {{
+                width: 100%;
+                height: 60px;
+                background: #e6eef7;   /* light blue/grey */
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                 position: fixed;
-                top: 10px;
-                left: 10px;
-                text-decoration: none;
-                font-size: 16px;
-                color: #333;
-                border: 1px solid #ccc;
-                padding: 8px 12px;
-                border-radius: 5px;
-                background-color: #f9f9f9;
-                transition: background-color 0.3s ease;
+                top: 0;
+                left: 0;
+                z-index: 9999;
+                flex-wrap: wrap;
+                box-sizing: border-box;
               }}
-              .back-button:hover {{
-                background-color: #e0e0e0;
+
+              .nav-left,
+              .nav-right {{
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  flex-wrap: wrap;
+                  max-width: 45%;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+              }}
+
+              .nav-right span {{
+                  display: inline-block;
+                  max-width: 200px;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+              }}
+
+              .navbar a.button {{
+                  background-color: #007BFF;
+                  padding: 8px 14px;
+                  color: white;
+                  border-radius: 4px;
+                  font-size: 14px;
+                  text-decoration: none;
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 6px;
+                  white-space: nowrap;
+              }}
+
+              .navbar a.button:hover {{
+                  background-color: #0056b3;
+              }}
+
+              body {{
+                  padding-top: 70px;  /* ensures content starts below navbar */
               }}
               .wide-container {{
                 max-width: 85% !important;
@@ -393,12 +556,31 @@ def predict_best_threshold():
             print('Number rows', len(body_rows))
 
             return render_template_string(base_css + """
-            <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
-              &#x1F3E0;
-            </a>
+            <div class="navbar">
+                <div class="nav-left">
+                    <a href="{{ url_for('index') }}" class="button">
+                        <i class="fas fa-home"></i> Home
+                    </a>
+                </div>
+                <div class="nav-right">
+                    {% if session.get('user') %}
+                        <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                            👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}</span>
+                        <a href="{{ url_for('logout') }}" class="button">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                    {% else %}
+                        <a href="{{ url_for('login') }}" class="button">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
             <div class="container my-4 wide-container">
                 <div class="mt-4">
-                    <a href="{{ url_for('predict_best_threshold') }}" class="btn btn-primary">Try Again</a>
+                    <a href="{{ url_for('predict_best_threshold') }}" class="btn-primary">
+                        <i class="fas fa-redo"></i> Try Again
+                    </a>
                 </div>
                 <h2 class="mb-3">Prediction with Best Profit Threshold</h2>
                 <div class="alert alert-success">
@@ -415,31 +597,31 @@ def predict_best_threshold():
 
     return render_template_string(base_css + """
     <style>
-      .back-button {
-          position: fixed;
-          top: 10px;
-          left: 10px;
-          text-decoration: none;
-          font-size: 16px;
-          color: #333;
-          border: 1px solid #ccc;
-          padding: 8px 12px;
-          border-radius: 5px;
-          background-color: #f9f9f9;
-          transition: background-color 0.3s ease;
-          z-index: 1000;
-      }
-      .back-button:hover {
-          background-color: #e0e0e0;
-      }
       .wide-container {
           max-width: 85% !important;
       }
     </style>
 
-    <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
-      &#x1F3E0;
-    </a>
+    <div class="navbar">
+        <div class="nav-left">
+            <a href="{{ url_for('index') }}" class="button">
+                <i class="fas fa-home"></i> Home
+            </a>
+        </div>
+        <div class="nav-right">
+            {% if session.get('user') %}
+                <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                    👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}</span>
+                <a href="{{ url_for('logout') }}" class="button">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="button">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+            {% endif %}
+        </div>
+    </div>
     <div class="container my-4 wide-container">
       <h2>Predict Churn Using Best Profit Threshold</h2>
       <form method="POST" class="row g-3">
@@ -797,21 +979,62 @@ def predict_xai():
                 text-align: center;
                 padding: 0.5rem 0.75rem;
               }}
-              .back-button {{
+              .navbar {{
+                width: 100%;
+                height: 60px;
+                background: #e6eef7;   /* light blue/grey */
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                 position: fixed;
-                top: 10px;
-                left: 10px;
-                text-decoration: none;
-                font-size: 16px;
-                color: #333;
-                border: 1px solid #ccc;
-                padding: 8px 12px;
-                border-radius: 5px;
-                background-color: #f9f9f9;
-                transition: background-color 0.3s ease;
+                top: 0;
+                left: 0;
+                z-index: 9999;
+                flex-wrap: wrap;
+                box-sizing: border-box;
               }}
-              .back-button:hover {{
-                background-color: #e0e0e0;
+
+              .nav-left,
+              .nav-right {{
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  flex-wrap: wrap;
+                  max-width: 45%;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+              }}
+
+              .nav-right span {{
+                  display: inline-block;
+                  max-width: 200px;
+                  overflow: hidden;
+                  text-overflow: ellipsis;
+                  white-space: nowrap;
+              }}
+
+              .navbar a.button {{
+                  background-color: #007BFF;
+                  padding: 8px 14px;
+                  color: white;
+                  border-radius: 4px;
+                  font-size: 14px;
+                  text-decoration: none;
+                  display: inline-flex;
+                  align-items: center;
+                  gap: 6px;
+                  white-space: nowrap;
+              }}
+
+              .navbar a.button:hover {{
+                  background-color: #0056b3;
+              }}
+
+              body {{
+                  padding-top: 70px;  /* ensures content starts below navbar */
               }}
               .wide-container {{
                 max-width: 85% !important;
@@ -825,12 +1048,31 @@ def predict_xai():
             """
 
             return render_template_string(base_css + """
-            <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
-              &#x1F3E0;
-            </a>
+            <div class="navbar">
+                <div class="nav-left">
+                    <a href="{{ url_for('index') }}" class="button">
+                        <i class="fas fa-home"></i> Home
+                    </a>
+                </div>
+                <div class="nav-right">
+                    {% if session.get('user') %}
+                        <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                            👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}</span>
+                        <a href="{{ url_for('logout') }}" class="button">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                    {% else %}
+                        <a href="{{ url_for('login') }}" class="button">
+                            <i class="fas fa-sign-in-alt"></i> Login
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
             <div class="container my-4 wide-container">
                 <div class="mt-4">
-                    <a href="{{ url_for('predict_xai') }}" class="btn btn-primary">Try Again</a>
+                    <a href="{{ url_for('predict_xai') }}" class="btn-primary">
+                        <i class="fas fa-redo"></i> Try Again                      
+                    </a>
                 </div>
                 <h2 class="mb-3">Predict Churn with XAI Options</h2>
                 <div class="alert alert-success">
@@ -862,31 +1104,31 @@ def predict_xai():
 
     return render_template_string(base_css + """
     <style>
-      .back-button {
-          position: fixed;
-          top: 10px;
-          left: 10px;
-          text-decoration: none;
-          font-size: 16px;
-          color: #333;
-          border: 1px solid #ccc;
-          padding: 8px 12px;
-          border-radius: 5px;
-          background-color: #f9f9f9;
-          transition: background-color 0.3s ease;
-          z-index: 1000;
-      }
-      .back-button:hover {
-          background-color: #e0e0e0;
-      }
       .wide-container {
           max-width: 85% !important;
       }
     </style>
 
-    <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
-      &#x1F3E0;
-    </a>
+    <div class="navbar">
+        <div class="nav-left">
+            <a href="{{ url_for('index') }}" class="button">
+                <i class="fas fa-home"></i> Home
+            </a>
+        </div>
+        <div class="nav-right">
+            {% if session.get('user') %}
+                <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                    👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}</span>
+                <a href="{{ url_for('logout') }}" class="button">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="button">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+            {% endif %}
+        </div>
+    </div>
 
     <div class="container my-4 wide-container">
       <h2>Predict Churn with Explainable AI (XAI)</h2>

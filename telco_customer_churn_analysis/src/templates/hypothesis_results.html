@@ -3,12 +3,13 @@
 <head>
     <meta charset="UTF-8" />
     <title>Chi-Squared Test Results</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
             background: #f4f6f8;
             margin: 0;
-            padding: 0;
+            padding-top: 70px;
         }
         .container {
             max-width: 1200px;
@@ -16,12 +17,21 @@
             padding: 20px;
             background: #f9f9f9;
             border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
         }
-        pre {
-            background-color: #f4f4f4;
-            padding: 15px;
-            border-radius: 6px;
-            overflow-x: auto;
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: #007BFF;
+            color: white;
+            padding: 8px 14px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .btn-primary:hover {
+            background-color: #0056b3;
         }
         a {
             text-decoration: none;
@@ -30,33 +40,99 @@
         a:hover {
             text-decoration: underline;
         }
-        .back-button {
+        .navbar {
+            width: 100%;
+            height: 60px;
+            background: #e6eef7;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             position: fixed;
-            top: 10px;
-            left: 10px;
-            text-decoration: none;
-            font-size: 16px;
-            color: #333;
-            border: 1px solid #ccc;
-            padding: 8px 12px;
-            border-radius: 5px;
-            background-color: #f9f9f9;
-            transition: background-color 0.3s ease;
+            top: 0;
+            left: 0;
+            z-index: 9999;
+            flex-wrap: wrap;
+            box-sizing: border-box;
         }
-        .back-button:hover {
-            background-color: #e0e0e0;
+        .nav-left,
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            max-width: 45%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .nav-right span {
+            display: inline-block;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .navbar a.button {
+            background-color: #007BFF;
+            padding: 8px 14px;
+            color: white;
+            border-radius: 4px;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        .navbar a.button:hover {
+            background-color: #0056b3;
+        }
+
+        pre {
+            max-width: 1200px;
+            margin: 20px auto;
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        h1, h2 {
+            text-align: center;
+            color: #333;
         }
     </style>
 </head>
 <body>
-    <a href="{{ url_for('index') }}" class="back-button" title="Back to Home">
-        &#x1F3E0;
-    </a>
-    <div class="container">
-        <div class="mt-4">
-            <a href="{{ url_for('run_hypothesis_tests') }}" class="btn btn-primary">Try Again</a>
+    <div class="navbar">
+        <div class="nav-left">
+            <a href="{{ url_for('index') }}" class="button">
+                <i class="fas fa-home"></i> Home
+            </a>
         </div>
-        <h2>Chi-Squared Test Results ({{ source }} Data)</h2>
+        <div class="nav-right">
+            {% if session.get('user') %}
+                <span title="{{ session['user']['given_name'] }} {{ session['user']['family_name'] }}">
+                    👤 {{ session['user']['given_name'] }} {{ session['user']['family_name'] | truncate(15) }}</span>
+                <a href="{{ url_for('logout') }}" class="button">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="button">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="container my-4">
+        <div class="mt-4">
+            <a href="{{ url_for('run_hypothesis_tests') }}" class="btn-primary">
+                <i class="fas fa-redo"></i> Try Again
+            </a>
+        </div>
+        <h2 class="mb-3">Chi-Squared Test Results ({{ source }} Data)</h2>
         <pre>{{ result }}</pre>
     </div>
 </body>
