@@ -647,6 +647,88 @@ def predict_best_threshold():
         </div>
       </form>
     </div>
+    <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const internetService = document.getElementById("Internet_Service");
+        const phoneService = document.getElementById("Phone_Service");
+
+        const internetDependentFields = [
+            "Online_Security",
+            "Online_Backup",
+            "Device_Protection",
+            "Tech_Support",
+            "Streaming_TV",
+            "Streaming_Movies"
+        ];
+
+        function updateInternetFields() {
+            const serviceValue = internetService.value;
+
+            internetDependentFields.forEach(id => {
+                const field = document.getElementById(id);
+
+                // Re-enable options first
+                Array.from(field.options).forEach(opt => opt.disabled = false);
+
+                if (serviceValue === "No") {
+                    // Only allow "No internet service"
+                    Array.from(field.options).forEach(opt => {
+                        if (opt.value !== "No internet service") opt.disabled = true;
+                    });
+                    field.value = "No internet service";
+                }
+                else if (serviceValue === "DSL" || serviceValue === "Fiber optic") {
+                    // Block "No internet service"
+                    Array.from(field.options).forEach(opt => {
+                        if (opt.value === "No internet service") opt.disabled = true;
+                    });
+                    if (field.value === "No internet service")
+                        field.value = ""; // force user to pick Yes/No
+                }
+                else {
+                    // If Internet Service not chosen → disable dependent fields
+                    Array.from(field.options).forEach(opt => opt.disabled = true);
+                    field.value = "";
+                }
+            });
+        }
+
+        function updatePhoneFields() {
+            const serviceValue = phoneService.value;
+            const multipleLines = document.getElementById("Multiple_Lines");
+
+            // Re-enable options first
+            Array.from(multipleLines.options).forEach(opt => opt.disabled = false);
+
+            if (serviceValue === "No") {
+                // Only allow "No phone service"
+                Array.from(multipleLines.options).forEach(opt => {
+                    if (opt.value !== "No phone service") opt.disabled = true;
+                });
+                multipleLines.value = "No phone service";
+            } else if (serviceValue === "Yes") {
+                // Allow Yes or No, block "No phone service"
+                Array.from(multipleLines.options).forEach(opt => {
+                    if (opt.value === "No phone service") opt.disabled = true;
+                });
+                if (multipleLines.value === "No phone service")
+                    multipleLines.value = ""; // force user to pick Yes/No
+            } else {
+                // If Phone Service not chosen → disable Multiple Lines
+                Array.from(multipleLines.options).forEach(opt => opt.disabled = true);
+                multipleLines.value = "";
+            }
+        }
+
+        // Add event listeners
+        internetService.addEventListener("change", updateInternetFields);
+        phoneService.addEventListener("change", updatePhoneFields);
+
+        // Initial update
+        updateInternetFields();
+        updatePhoneFields();
+    });
+    </script>
     """)
 
 
@@ -1028,6 +1110,88 @@ def predict_xai():
         </div>
       </form>
     </div>
+    <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const internetService = document.getElementById("Internet_Service");
+        const phoneService = document.getElementById("Phone_Service");
+
+        const internetDependentFields = [
+            "Online_Security",
+            "Online_Backup",
+            "Device_Protection",
+            "Tech_Support",
+            "Streaming_TV",
+            "Streaming_Movies"
+        ];
+
+        function updateInternetFields() {
+            const serviceValue = internetService.value;
+
+            internetDependentFields.forEach(id => {
+                const field = document.getElementById(id);
+
+                // Re-enable options first
+                Array.from(field.options).forEach(opt => opt.disabled = false);
+
+                if (serviceValue === "No") {
+                    // Only allow "No internet service"
+                    Array.from(field.options).forEach(opt => {
+                        if (opt.value !== "No internet service") opt.disabled = true;
+                    });
+                    field.value = "No internet service";
+                }
+                else if (serviceValue === "DSL" || serviceValue === "Fiber optic") {
+                    // Block "No internet service"
+                    Array.from(field.options).forEach(opt => {
+                        if (opt.value === "No internet service") opt.disabled = true;
+                    });
+                    if (field.value === "No internet service")
+                        field.value = ""; // force user to pick Yes/No
+                }
+                else {
+                    // If Internet Service not chosen → disable dependent fields
+                    Array.from(field.options).forEach(opt => opt.disabled = true);
+                    field.value = "";
+                }
+            });
+        }
+
+        function updatePhoneFields() {
+            const serviceValue = phoneService.value;
+            const multipleLines = document.getElementById("Multiple_Lines");
+
+            // Re-enable options first
+            Array.from(multipleLines.options).forEach(opt => opt.disabled = false);
+
+            if (serviceValue === "No") {
+                // Only allow "No phone service"
+                Array.from(multipleLines.options).forEach(opt => {
+                    if (opt.value !== "No phone service") opt.disabled = true;
+                });
+                multipleLines.value = "No phone service";
+            } else if (serviceValue === "Yes") {
+                // Allow Yes or No, block "No phone service"
+                Array.from(multipleLines.options).forEach(opt => {
+                    if (opt.value === "No phone service") opt.disabled = true;
+                });
+                if (multipleLines.value === "No phone service")
+                    multipleLines.value = ""; // force user to pick Yes/No
+            } else {
+                // If Phone Service not chosen → disable Multiple Lines
+                Array.from(multipleLines.options).forEach(opt => opt.disabled = true);
+                multipleLines.value = "";
+            }
+        }
+
+        // Add event listeners
+        internetService.addEventListener("change", updateInternetFields);
+        phoneService.addEventListener("change", updatePhoneFields);
+
+        // Initial update
+        updateInternetFields();
+        updatePhoneFields();
+    });
+    </script>
     """)
 
 
