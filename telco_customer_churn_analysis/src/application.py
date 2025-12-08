@@ -80,8 +80,8 @@ base_css = """
 <style>
 @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css');
 
-body { font-family: Arial, sans-serif; background: #f4f6f8; margin: 0; padding: 0;}
-.container { max-width: 800px; margin: 30px auto; background: white; padding: 20px; border-radius: 6px; box-shadow: 0 0 10px #ccc;}
+body { font-family: Arial, sans-serif; background: #dfe6f1; margin: 0; padding: 0;}
+.container { max-width: 550px; margin: 30px auto; background: #e6eef7; padding: 20px; border-radius: 6px; box-shadow: 0 0 10px #ccc;}
 h1, h2 { color: #333; }
 input[type=text], input[type=number], select { width: 100%; padding: 8px; margin: 6px 0 12px; border: 1px solid #ccc; border-radius: 4px; }
 button { background-color: #007BFF; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
@@ -92,7 +92,7 @@ button:hover { background-color: #0056b3; }
 pre { background: #eee; padding: 15px; border-radius: 6px; overflow-x: auto; }
 label { font-weight: bold; }
 a { text-decoration: none; color: #007BFF; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: none; }
 
 /* === Loading overlay and spinner === */
 #loading-overlay {
@@ -101,7 +101,7 @@ a:hover { text-decoration: underline; }
   z-index: 9999;
   top: 0; left: 0;
   width: 100%; height: 100%;
-  background: #f4f6f8;
+  background: #dfe6f1;
   backdrop-filter: blur(4px);
   text-align: center;
   align-items: center;
@@ -272,6 +272,85 @@ def index():
       <div id="loading-text-time">...Can take up to 5 min...</div>
     </div>
                                   
+    <style>
+      .menu-wrapper {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        margin-top: 25px;
+      }
+
+      .menu-btn {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #007BFF;
+        color: white;
+        padding: 14px 20px;
+        border-radius: 6px;
+        font-size: 16px;
+        font-weight: bold;
+        text-decoration: none;
+        transition: background 0.2s ease;
+        width: auto;
+        min-width: 350px;
+        text-align: center;
+      }
+                                  
+      .menu-btn:hover {
+        background: #0056b3;
+      }
+
+      .menu-btn i {
+        font-size: 18px;
+      }
+                                  
+      h1 {
+        text-align: center;
+        font-size: 26px;
+        font-weight: 700;
+        color: #2a3a4d;
+        margin-bottom: 25px;
+        padding-top: 10px;
+        border-bottom: 2px solid #007BFF33;
+        cursor: default;
+      }
+
+      .footer {
+        text-align: center;
+        margin-top: 35px;
+        padding-top: 12px;
+        font-size: 14px;
+        color: #34475a;
+        opacity: 0.8;
+        border-top: 1px solid rgba(0, 0, 0, 0.08);
+        cursor: default;
+      }
+      .footer strong {
+        font-weight: 600;
+        color: #2a3a4d;
+      }
+      .footer:hover {
+        opacity: 1;
+        transition: 0.3s ease-in-out;
+      }
+
+      .footer a {
+        color: #2a3a4d;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .footer a:hover {
+        opacity: 1;
+        transition: 0.3s ease-in-out;
+        text-decoration: underline;
+      }
+
+    </style>
+                                  
     <div class="navbar">
         <div class="nav-left">
             <a href="{{ url_for('index') }}" class="button">
@@ -305,13 +384,26 @@ def index():
       {% endwith %}
                                   
       <h1>Telco Customer Churn Analysis</h1>
-      <ul>
-        <li><a href="{{ url_for('run_eda') }}" onclick="showLoading()">Run Exploratory Data Analysis (EDA)</a></li>
-        <li><a href="{{ url_for('run_hypothesis_tests') }}" onclick="showLoading()">Run Hypothesis Tests (Chi2)</a></li>
-        <li><a href="{{ url_for('run_train_evaluate_deploy') }}" onclick="showLoading()">Train, Evaluate, Deploy Model</a></li>
-        <li><a href="{{ url_for('predict_best_threshold') }}" onclick="showLoading()">Predict with Best Profit Threshold</a></li>
-        <li><a href="{{ url_for('predict_xai') }}" onclick="showLoading()">Predict with Explainable AI (XAI)</a></li>
-      </ul>
+      <div class="menu-wrapper">
+        <a href="{{ url_for('run_eda') }}" class="menu-btn" onclick="showLoading()">
+          <i class="fas fa-chart-bar"></i>Run Exploratory Data Analysis (EDA)
+        </a>
+        <a href="{{ url_for('run_hypothesis_tests') }}" class="menu-btn" onclick="showLoading()">
+          <i class="fas fa-balance-scale"></i>Run Hypothesis Tests (Chi2)
+        </a>
+        <a href="{{ url_for('run_train_evaluate_deploy') }}" class="menu-btn" onclick="showLoading()">
+          <i class="fas fa-robot"></i>Train, Evaluate, Deploy Model
+        </a>
+        <a href="{{ url_for('predict_best_threshold') }}" class="menu-btn" onclick="showLoading()">
+          <i class="fas fa-bullseye"></i>Predict with Best Profit Threshold
+        </a>
+        <a href="{{ url_for('predict_xai') }}" class="menu-btn" onclick="showLoading()">
+          <i class="fas fa-lightbulb"></i>Predict with Explainable AI (XAI)
+        </a>
+      </div>
+      <div class="footer">
+        Project by <a href="https://profile.gabrieldatascience.com/" target="_blank"<strong>Gabriel Alves</strong>
+      </div>
     </div>
     """, user_logged_in=user_logged_in)
 
