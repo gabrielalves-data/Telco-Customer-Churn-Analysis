@@ -101,7 +101,10 @@ def model_global_explainer(model: Pipeline, X_train: pd.DataFrame, X_test: pd.Da
 
     if isinstance(classifier, tree_models):
             explainer = shap.TreeExplainer(classifier, feature_perturbation='tree_path_dependent')
-            shap_values = explainer.shap_values(X_test_for_shap)
+            if len(X_test_for_shap) > 500:
+                X_test_for_shap = X_test_transformed_df.sample(n=500, random_state=random_state)
+            
+            shap_values = explainer.shap_values(X_test_for_shap, check_additivity=False)
             explainer_type = 'TreeExplainer'
     else:
         sample_size = min(n_samples, len(X_train_transformed_df))
@@ -462,7 +465,7 @@ def model_local_explainer_app(model: Pipeline, X_train: pd.DataFrame, X_test: pd
 
     else:
         sample_size = min(n_samples, len(X_train_transformed_df))
-        X_train_sample = X_train_transformed_df.sample(n=n_samples, random_state=random_state)
+        X_train_sample = X_train_transformed_df.sample(n=sample_size, random_state=random_state)
         X_background = shap.kmeans(X_train_sample, n_clusters).data
         model_predict_proba = classifier.predict_proba
         explainer = shap.KernelExplainer(model_predict_proba, X_background)
