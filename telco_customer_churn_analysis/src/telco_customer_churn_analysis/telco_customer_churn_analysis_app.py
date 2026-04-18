@@ -700,7 +700,9 @@ def predict_with_xai_app(df = None, threshold_input: float = 0.5,
     global_xai_img = ""
     local_xai_img = ""
 
-    results_bundle = download_from_s3(MODEL_FILENAME)
+    results_bundle = None
+    if global_xai or local_xai:
+        results_bundle = download_from_s3(MODEL_FILENAME)
     
     if global_xai:
         X_train, X_test = results_bundle['X_train'], results_bundle['X_test']
