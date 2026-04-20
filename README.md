@@ -9,6 +9,10 @@
 
 * MIT License
 
+## 🎥 App Demo
+
+[![Watch Demo](https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg)](https://youtu.be/q_E4YNjwJQA)
+
 ## 📖 Overview
 This project delivers an end-to-end, cloud-deployed Machine Learning system for predicting customer churn and optimizing retention campaign profitability. Unlike traditional notebook-only analyses, this repository provides:
 * A high-recall Random Forest model (≈ 88%)
