@@ -11,7 +11,10 @@
 
 ## 🎥 App Demo
 
-[![Watch Demo](https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg)](https://youtu.be/q_E4YNjwJQA)
+> **Live demo retired.** The hosted instance (Render + AWS Cognito/S3) was shut down on purpose to avoid
+> cloud costs for a demo project. The video below shows the app running end to end.
+
+[![Watch Demo](https://img.youtube.com/vi/q_E4YNjwJQA/0.jpg)](https://youtu.be/q_E4YNjwJQA)
 
 ## 📖 Overview
 This project delivers an end-to-end, cloud-deployed Machine Learning system for predicting customer churn and optimizing retention campaign profitability. Unlike traditional notebook-only analyses, this repository provides:
@@ -20,7 +23,6 @@ This project delivers an end-to-end, cloud-deployed Machine Learning system for 
 * Profit Curve Optimization identifying the financial threshold that maximizes campaign ROI
 * A secure cloud deployment (Render + AWS Cognito + S3)
 * A production-ready web application for real-time inference
-* A fully packaged Python library available on PyPI
 * An A/B/C testing engine for scientific ROI measurement
 This system transforms churn management into a measurable, financially optimized business process.
 
@@ -32,7 +34,7 @@ A profit-driven analysis determined:
 This approach ensures churn prevention is not just predictive — it’s profit-optimized.
 
 ## 🏗 Deployment Architecture
-```
+```mermaid
 graph TD
     User([User]) -->|HTTPS / Custom Domain| CF[AWS CloudFront CDN]
     CF -->|Security Rules| WAF[AWS WAF]
@@ -56,7 +58,6 @@ graph TD
 ```
 
 ## 📦 Installation
-```pip install telco_customer_churn_analysis```
 
 ### Local Setup
 ```
